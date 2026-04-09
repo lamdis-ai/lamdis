@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lamdis.fullname" . }}-api
+  labels:
+    {{- include "lamdis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "lamdis.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "lamdis.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: api
+          image: {{ include "lamdis.image" (dict "registry" .Values.global.imageRegistry "image" .Values.api.image "tag" .Values.global.imageTag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "lamdis.fullname" . }}-config
+            - secretRef:
+                name: {{ include "lamdis.fullname" . }}-secret
+          env:
+            - name: PORT
+              value: {{ .Values.api.port | quote }}
+            # MongoDB removed - fully migrated to PostgreSQL
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lamdis.fullname" . }}-secret
+                  key: database-url
+            {{- if and (eq .Values.global.entitlementsMode "license_file") .Values.license.secretName }}
+            - name: LAMDIS_LICENSE_PATH
+              value: /etc/lamdis/license.jwt
+            {{- end }}
+          {{- if and (eq .Values.global.entitlementsMode "license_file") .Values.license.secretName }}
+          volumeMounts:
+            - name: license
+              mountPath: /etc/lamdis
+              readOnly: true
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+      {{- if and (eq .Values.global.entitlementsMode "license_file") .Values.license.secretName }}
+      volumes:
+        - name: license
+          secret:
+            secretName: {{ .Values.license.secretName }}
+            items:
+              - key: {{ .Values.license.key }}
+                path: license.jwt
+      {{- end }}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

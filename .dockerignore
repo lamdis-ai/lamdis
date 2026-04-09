@@ -1,0 +1,17 @@
+node_modules
+.git
+.next
+dist
+.turbo
+.logs
+.pids
+.sfdx
+.claude
+.env
+.env.*
+*.tgz
+*.log
+coverage
+lamdis-cloud-infra
+lamdis-deploy
+scripts

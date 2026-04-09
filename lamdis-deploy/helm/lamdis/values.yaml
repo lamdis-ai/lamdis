@@ -1,0 +1,115 @@
+## ─────────────────────────────────────────────────────────
+## Lamdis Helm Chart — Default Values (Self-Hosted)
+## ─────────────────────────────────────────────────────────
+
+global:
+  deploymentMode: self_hosted
+  authMode: oidc
+  entitlementsMode: license_file
+  imageRegistry: ghcr.io/lamdis-ai
+  imageTag: "1.0.0"
+  imagePullPolicy: IfNotPresent
+
+## ── API Service ──────────────────────────────────────────
+api:
+  replicaCount: 2
+  image: lamdis-api
+  port: 3001
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+## ── Web Service ──────────────────────────────────────────
+web:
+  replicaCount: 2
+  image: lamdis-web
+  port: 3000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+## ── Runs Service ─────────────────────────────────────────
+runs:
+  replicaCount: 1
+  image: lamdis-runs
+  port: 3101
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+## ── MongoDB ──────────────────────────────────────────────
+## Set enabled=false and provide externalUri for managed MongoDB.
+mongodb:
+  enabled: true
+  image: mongo:7
+  storage: 10Gi
+  storageClassName: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  externalUri: ""
+
+## ── OIDC Authentication ──────────────────────────────────
+oidc:
+  issuer: ""
+  audience: ""
+  clientId: ""
+  clientSecret: ""
+  jwksUri: ""
+  groupClaim: "groups"
+  roleMap: "{}"
+
+## ── License ──────────────────────────────────────────────
+## Create the secret before installing:
+##   kubectl create secret generic lamdis-license --from-file=license.jwt=./license.jwt
+license:
+  secretName: lamdis-license
+  key: license.jwt
+
+## ── Bootstrap ────────────────────────────────────────────
+bootstrap:
+  adminToken: ""
+
+## ── Service-to-Service Auth ──────────────────────────────
+apiToken: ""
+
+## ── AWS Credentials (for Runs) ───────────────────────────
+aws:
+  accessKeyId: ""
+  secretAccessKey: ""
+  region: "us-east-1"
+
+## ── Ingress ──────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: nginx
+  host: lamdis.example.com
+  tls:
+    enabled: false
+    secretName: ""
+  annotations: {}

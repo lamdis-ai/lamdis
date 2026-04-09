@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom utilities backed by theme colors */
+@layer utilities {
+	.bg-paper { background-color: theme('colors.paper'); }
+	.bg-ink { background-color: theme('colors.ink'); }
+	.text-ink { color: theme('colors.ink'); }
+}
+
+/* Universal scrollbar styling */
+/* WebKit-based browsers */
+*::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+*::-webkit-scrollbar-track {
+	background: #0f172a; /* slate-900 */
+}
+*::-webkit-scrollbar-thumb {
+	background-color: #334155; /* slate-700 */
+	border-radius: 8px;
+	border: 2px solid #0f172a;
+}
+*::-webkit-scrollbar-thumb:hover {
+	background-color: #475569; /* slate-600 */
+}
+
+/* Firefox */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: #334155 #0f172a; /* thumb track */
+}
+
+/* Fonts are self-hosted via geist/font; see app/layout.tsx for wiring */
+
+@layer base {
+	:root { color-scheme: light dark; }
+	/* Increased base font size from 16px -> 17px for overall readability */
+	html, body { @apply overflow-x-hidden; }
+	body { @apply bg-white dark:bg-slate-900 text-ink font-sans text-[17px] leading-[1.55] antialiased; }
+}
+
+
+/* Reusable tab strip */
+.tabs-bar { @apply flex gap-1 mb-4 overflow-x-auto relative; }
+.tabs-bar { @apply border-b border-slate-200 dark:border-slate-700; }
+.tab-btn { @apply px-4 py-2 text-sm whitespace-nowrap relative font-medium transition-colors; }
+.tab-btn-active { @apply text-slate-900 dark:text-white font-semibold; }
+.tab-btn-inactive { @apply text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200; }
+.tab-btn-indicator { @apply absolute left-0 right-0 -bottom-[1px] h-0.5 rounded-full bg-cyan; }
+
+/* Global dark scrollbar (scoped to dark mode) */
+@media (prefers-color-scheme: dark) {
+	/* Universal dark scrollbar styling for all scrollable elements */
+	* { scrollbar-width: thin; scrollbar-color: rgba(100,116,139,0.40) transparent; }
+	*::-webkit-scrollbar { width: 10px; height:10px; }
+	*::-webkit-scrollbar-track { background: transparent; }
+	*::-webkit-scrollbar-thumb { background: rgba(100,116,139,0.35); border-radius: 999px; border:2px solid transparent; background-clip:content-box; }
+	*::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.55); }
+}
+
+/* Headings scale */
+/* Global typography scale bumped ~1 step for better legibility */
+h1 { @apply font-heading font-semibold text-[44px] leading-[52px]; }
+h2 { @apply font-heading font-semibold text-[36px] leading-[44px]; }
+h3 { @apply font-heading font-semibold text-[26px] leading-[34px]; }
+h4 { @apply font-heading font-medium text-[22px] leading-[30px]; }
+
+/* Body sizes */
+.text-body-lg { @apply text-[19px] leading-[30px]; }
+.text-ui { @apply text-[15px] leading-[22px]; }
+.text-caption { @apply text-[13px] leading-[18px]; }
+.text-code { @apply font-mono text-[14px] leading-[22px] no-ligs; }
+
+/* Buttons */
+.btn { @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors select-none; }
+.btn-primary { @apply bg-slate-900 text-white hocus:bg-slate-800; }
+.btn-ghost { @apply text-ink hocus:bg-slate-100 dark:hocus:bg-slate-800 rounded-full; }
+.btn-gradient { @apply text-white bg-brand-gradient shadow-elev-2 hover:shadow-elev-3; }
+.btn-pattern { @apply relative overflow-hidden; }
+.btn-pattern::after { content:""; @apply absolute inset-0 opacity-0 transition-opacity; background-image:var(--pattern-url,radial-gradient(circle at 1px 1px,rgba(148,163,184,0.08) 1px,transparent 0)); background-size:24px 24px; }
+.btn-pattern:hover::after, .btn-pattern:focus-visible::after { @apply opacity-10; }
+
+/* Inputs - base styles, background/colors are set by components or dark mode override */
+input[type=text], input[type=password], input[type=email], textarea, select { @apply border rounded-input px-3 py-2 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan focus:border-cyan text-sm; }
+input:disabled { @apply opacity-60 cursor-not-allowed; }
+textarea { @apply resize-y; }
+
+/* Dark theme overrides */
+@media (prefers-color-scheme: dark) {
+	body { @apply bg-slate-900 text-slate-50; }
+	input, textarea, select { @apply bg-slate-800 border-slate-600 placeholder-slate-500 text-slate-100; }
+	.card { @apply bg-slate-800 text-slate-100 border-slate-600; }
+	/* Lighten commonly used gray text utilities for readability on dark background */
+	.text-gray-700 { color: #E2E8F0 !important; } /* slate-200 */
+	.text-gray-600 { color: #CBD5E1 !important; } /* slate-300 */
+	.text-gray-500 { color: #94A3B8 !important; } /* slate-400 */
+}
+
+/* Scoped dark scrollbar for scrollable panels */
+.scroll-dark { scrollbar-width: thin; scrollbar-color: rgba(100,116,139,0.4) transparent; }
+.scroll-dark::-webkit-scrollbar { width: 10px; }
+.scroll-dark::-webkit-scrollbar-track { background: transparent; }
+.scroll-dark::-webkit-scrollbar-thumb { background: rgba(100,116,139,0.35); border-radius: 999px; border:2px solid transparent; background-clip:content-box; }
+.scroll-dark::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.55); }
+
+/* White surface with black thumb scrollbar variant */
+.scroll-black { scrollbar-width: thin; scrollbar-color: #000000 #ffffff; }
+.scroll-black::-webkit-scrollbar { width: 10px; }
+.scroll-black::-webkit-scrollbar-track { background: #ffffff; }
+.scroll-black::-webkit-scrollbar-thumb { background: #000000; border-radius: 999px; border:2px solid #ffffff; }
+.scroll-black::-webkit-scrollbar-thumb:hover { background: #111111; }
+
+/* Reusable scrollbar (always dark theme friendly) */
+.scrollbar { scrollbar-width: thin; scrollbar-color: rgba(100,116,139,0.40) transparent; }
+.scrollbar::-webkit-scrollbar { width:10px; height:10px; }
+.scrollbar::-webkit-scrollbar-track { background:transparent; }
+.scrollbar::-webkit-scrollbar-thumb { background: rgba(100,116,139,0.35); border-radius:999px; border:2px solid transparent; background-clip:content-box; }
+.scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.55); }
+
+/* Stats / small uppercase label (light + dark) */
+.stat-label { text-transform:uppercase; letter-spacing:0.08em; font-size:0.65rem; font-weight:500; color:#64748b; }
+@media (prefers-color-scheme: dark){ .stat-label { color:#cbd5e1; } }
+
+/* Dividers */
+.divider { @apply h-px w-full bg-slate-200 dark:bg-slate-700; }
+
+/* Code & logs */
+pre, code { @apply font-mono text-[14px] leading-[22px] no-ligs; }
+pre { @apply bg-slate-900/95 text-slate-50 rounded-card p-4 overflow-auto relative; }
+code.inline { @apply px-1.5 py-0.5 rounded bg-slate-100 text-ink text-[14px] dark:bg-slate-800 dark:text-slate-100; }
+
+/* Selection - ensure visible highlight on dark and light */
+::selection { background: rgba(14,165,233,0.20); color: #0b1220; }
+@media (prefers-color-scheme: dark) {
+	::selection { background: rgba(59,130,246,0.35); color: #ffffff; }
+}
+
+/* Pattern utility placeholder (tile adjustable via --pattern-url) */
+.pattern-faint { opacity:0.04; }
+@media (prefers-color-scheme: dark) { .pattern-faint { opacity:0.03; } }
+
+/* Landing ticker animation */
+@keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+/* Agent chat markdown styling */
+.agent-markdown p { margin: 0.375rem 0; }
+.agent-markdown p:first-child { margin-top: 0; }
+.agent-markdown p:last-child { margin-bottom: 0; }
+.agent-markdown h1, .agent-markdown h2, .agent-markdown h3, .agent-markdown h4 {
+  font-size: inherit; font-weight: 600; color: #f1f5f9; margin: 0.75rem 0 0.375rem;
+}
+.agent-markdown h1 { font-size: 1.125rem; }
+.agent-markdown h2 { font-size: 1rem; }
+.agent-markdown h3 { font-size: 0.9375rem; }
+.agent-markdown strong { color: #f1f5f9; font-weight: 600; }
+.agent-markdown em { color: #cbd5e1; }
+.agent-markdown a { color: #e879f9; text-decoration: none; }
+.agent-markdown a:hover { text-decoration: underline; }
+.agent-markdown ul, .agent-markdown ol { margin: 0.375rem 0; padding-left: 1.25rem; }
+.agent-markdown ul { list-style-type: disc; }
+.agent-markdown ol { list-style-type: decimal; }
+.agent-markdown li { margin: 0.125rem 0; }
+.agent-markdown li::marker { color: #64748b; }
+.agent-markdown code {
+  background: rgba(51, 65, 85, 0.5); color: #67e8f9; font-size: 0.8125rem;
+  padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-family: var(--font-geist-mono), monospace;
+}
+.agent-markdown pre { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(51, 65, 85, 0.5); border-radius: 0.5rem; padding: 0.75rem; margin: 0.5rem 0; overflow-x: auto; }
+.agent-markdown pre code { background: none; padding: 0; color: #e2e8f0; font-size: 0.8125rem; }
+.agent-markdown blockquote { border-left: 2px solid #475569; padding-left: 0.75rem; margin: 0.5rem 0; color: #94a3b8; }
+.agent-markdown hr { border: none; border-top: 1px solid #334155; margin: 0.75rem 0; }
+.agent-markdown table { width: 100%; font-size: 0.8125rem; border-collapse: collapse; margin: 0.5rem 0; }
+.agent-markdown th { text-align: left; padding: 0.375rem 0.5rem; border-bottom: 1px solid #334155; color: #cbd5e1; font-weight: 600; }
+.agent-markdown td { padding: 0.375rem 0.5rem; border-bottom: 1px solid rgba(51, 65, 85, 0.3); color: #94a3b8; }
+.agent-markdown img { max-width: 100%; border-radius: 0.5rem; margin: 0.5rem 0; }
+.agent-markdown input[type="checkbox"] { margin-right: 0.375rem; accent-color: #e879f9; }
+

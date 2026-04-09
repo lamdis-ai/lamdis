@@ -1,0 +1,111 @@
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+	transpilePackages: ['@lamdis-ai/ui', '@lamdis-ai/shared-web'],
+	serverExternalPackages: ['@auth0/nextjs-auth0'],
+	async redirects() {
+		// Hard-disable legacy dashboard routes by redirecting to overview
+		const legacy = [
+			'/dashboard/action-library',
+			'/dashboard/action-packs',
+			'/dashboard/agents',
+			'/dashboard/ai-builder',
+			'/dashboard/app-calls-library',
+			'/dashboard/deploy',
+			'/dashboard/deploy/discovery',
+			'/dashboard/deploy/embed',
+			'/dashboard/deploy/integrations',
+			'/dashboard/developers',
+			'/dashboard/integrations',
+			'/dashboard/knowledge',
+			'/dashboard/knowledge/categories',
+			'/dashboard/manifest',
+			'/dashboard/manifest/compose',
+			'/dashboard/manifests',
+			'/dashboard/manifests/multi',
+			// id param variations
+			'/dashboard/manifests/:id*',
+			'/dashboard/mock-assistant',
+			'/dashboard/test',
+			'/dashboard/test-a2a',
+			'/dashboard/test-mcp',
+			// Pivot-cleanup: pages removed entirely
+			'/dashboard/assistants',
+			'/dashboard/assistants/:path*',
+			'/dashboard/workflows',
+			'/dashboard/workflows/:path*',
+			'/dashboard/instances',
+			'/dashboard/instances/:path*',
+			'/dashboard/analytics',
+			'/dashboard/personas',
+			'/dashboard/tests',
+			'/dashboard/verify',
+			'/dashboard/setups',
+			'/dashboard/evidence',
+			'/dashboard/requests',
+			'/dashboard/runs/:runid',
+			'/dashboard/runs/:runid/live',
+			'/dashboard/simulate/:instanceId',
+		];
+		const legacyRedirects = legacy.map((src) => ({ source: src, destination: '/dashboard', permanent: false }));
+
+		// IA reorg: old top-level pages -> new section folders
+		const moves = [
+			['/dashboard/outcomes', '/dashboard/library/objectives'],
+			['/dashboard/outcomes/:path*', '/dashboard/library/objectives/:path*'],
+			['/dashboard/channels', '/dashboard/library/channels'],
+			['/dashboard/channels/:path*', '/dashboard/library/channels/:path*'],
+			['/dashboard/actions', '/dashboard/library/actions'],
+			['/dashboard/actions/:path*', '/dashboard/library/actions/:path*'],
+			['/dashboard/action-bindings', '/dashboard/library/action-bindings'],
+			['/dashboard/action-bindings/:path*', '/dashboard/library/action-bindings/:path*'],
+			['/dashboard/code', '/dashboard/library/code'],
+			['/dashboard/code/:path*', '/dashboard/library/code/:path*'],
+			['/dashboard/policies', '/dashboard/library/policies'],
+			['/dashboard/policies/:path*', '/dashboard/library/policies/:path*'],
+			['/dashboard/boundaries', '/dashboard/library/boundaries'],
+			['/dashboard/boundaries/:path*', '/dashboard/library/boundaries/:path*'],
+			['/dashboard/settings/categories', '/dashboard/library/categories'],
+			['/dashboard/settings/categories/:path*', '/dashboard/library/categories/:path*'],
+			['/dashboard/suites', '/dashboard/library/suites'],
+			['/dashboard/suites/:path*', '/dashboard/library/suites/:path*'],
+			['/dashboard/build', '/dashboard/library/build'],
+			['/dashboard/build/:path*', '/dashboard/library/build/:path*'],
+
+			['/dashboard/outcome-instances', '/dashboard/activity/instances'],
+			['/dashboard/outcome-instances/:path*', '/dashboard/activity/instances/:path*'],
+			['/dashboard/workflow-runs', '/dashboard/activity/runs'],
+			['/dashboard/workflow-runs/:path*', '/dashboard/activity/runs/:path*'],
+			['/dashboard/action-executions', '/dashboard/activity/action-executions'],
+			['/dashboard/action-executions/:path*', '/dashboard/activity/action-executions/:path*'],
+			['/dashboard/proof', '/dashboard/activity/proof'],
+			['/dashboard/proof/:path*', '/dashboard/activity/proof/:path*'],
+			['/dashboard/audit', '/dashboard/activity/audit'],
+			['/dashboard/audit/:path*', '/dashboard/activity/audit/:path*'],
+			['/dashboard/event-simulator', '/dashboard/activity/event-simulator'],
+			['/dashboard/event-simulator/:path*', '/dashboard/activity/event-simulator/:path*'],
+			['/dashboard/testing/suites/:path*', '/dashboard/library/suites/:path*'],
+			['/dashboard/testing', '/dashboard/activity/test-results'],
+			['/dashboard/testing/:path*', '/dashboard/activity/test-results/:path*'],
+
+			['/dashboard/org/users', '/dashboard/settings/users'],
+			['/dashboard/org/users/:path*', '/dashboard/settings/users/:path*'],
+			['/dashboard/org/sso', '/dashboard/settings/sso'],
+			['/dashboard/org/sso/:path*', '/dashboard/settings/sso/:path*'],
+			['/dashboard/roles', '/dashboard/settings/roles'],
+			['/dashboard/roles/:path*', '/dashboard/settings/roles/:path*'],
+			['/dashboard/api-keys', '/dashboard/settings/api-keys'],
+			['/dashboard/api-keys/:path*', '/dashboard/settings/api-keys/:path*'],
+			['/dashboard/billing', '/dashboard/settings/billing'],
+			['/dashboard/billing/:path*', '/dashboard/settings/billing/:path*'],
+
+			['/dashboard/environments', '/dashboard/connections/environments'],
+			['/dashboard/environments/:path*', '/dashboard/connections/environments/:path*'],
+			['/dashboard/variables', '/dashboard/connections/variables'],
+			['/dashboard/variables/:path*', '/dashboard/connections/variables/:path*'],
+		];
+		const moveRedirects = moves.map(([source, destination]) => ({ source, destination, permanent: false }));
+
+		return [...legacyRedirects, ...moveRedirects];
+	},
+};
+export default nextConfig;

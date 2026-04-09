@@ -1,0 +1,40 @@
+version: '3.9'
+
+# =============================================================================
+# Docker Compose for lamdis-runs (MongoDB only)
+# 
+# Usage:
+#   docker-compose up
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # MongoDB configuration
+  # ---------------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  runs:
+    build: .
+    depends_on:
+      - mongo
+    environment:
+      - MONGO_URL=mongodb://mongo:27017/lamdis
+      - LAMDIS_API_TOKEN=changeme
+      # Bedrock (default judge provider):
+      - AWS_REGION=us-east-1
+      # - BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+      # OpenAI (optional, set JUDGE_PROVIDER=openai to use):
+      # - JUDGE_PROVIDER=openai
+      # - OPENAI_API_KEY=sk-...
+    ports:
+      - "3101:3101"
+    command: ["npm","run","dev"]
+
+volumes:
+  mongo-data:

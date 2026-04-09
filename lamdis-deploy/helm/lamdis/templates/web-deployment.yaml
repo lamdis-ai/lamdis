@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lamdis.fullname" . }}-web
+  labels:
+    {{- include "lamdis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "lamdis.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "lamdis.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      containers:
+        - name: web
+          image: {{ include "lamdis.image" (dict "registry" .Values.global.imageRegistry "image" .Values.web.image "tag" .Values.global.imageTag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.web.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "lamdis.fullname" . }}-config
+            - secretRef:
+                name: {{ include "lamdis.fullname" . }}-secret
+          env:
+            - name: PORT
+              value: {{ .Values.web.port | quote }}
+            - name: NEXT_PUBLIC_API_URL
+              value: "http://{{ include "lamdis.fullname" . }}-api:{{ .Values.api.port }}"
+            - name: NEXT_PUBLIC_LAMDIS_API_URL
+              value: "http://{{ include "lamdis.fullname" . }}-api:{{ .Values.api.port }}"
+            - name: NEXT_PUBLIC_LAMDIS_DEPLOYMENT_MODE
+              value: {{ .Values.global.deploymentMode | quote }}
+            - name: NEXT_PUBLIC_LAMDIS_AUTH_MODE
+              value: {{ .Values.global.authMode | quote }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+      {{- with .Values.web.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.web.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.web.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,92 @@
+##
+## Lamdis Desktop — Bundled services for the Electron app
+## Managed automatically by the desktop app. Do not edit.
+##
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lamdis
+      POSTGRES_USER: lamdis
+      POSTGRES_PASSWORD: lamdis
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - lamdis-desktop-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lamdis"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nats:
+    image: nats:2.10-alpine
+    command: ['-js', '-sd', '/data', '-m', '8222']
+    restart: unless-stopped
+    volumes:
+      - lamdis-desktop-natsdata:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    image: ghcr.io/lamdis-ai/lamdis-api:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      LAMDIS_DEPLOYMENT_MODE: self_hosted
+      LAMDIS_AUTH_MODE: disabled
+      LAMDIS_ENTITLEMENTS_MODE: open
+      DATABASE_URL: postgresql://lamdis:lamdis@postgres:5432/lamdis
+      NATS_URL: nats://nats:4222
+      LAMDIS_RUNS_URL: http://runs:3101
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  runs:
+    image: ghcr.io/lamdis-ai/lamdis-runs:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3101"
+      DATABASE_URL: postgresql://lamdis:lamdis@postgres:5432/lamdis
+      LAMDIS_API_URL: http://api:3001
+      LAMDIS_ENTITLEMENTS_MODE: open
+
+  web:
+    image: ghcr.io/lamdis-ai/lamdis-web:latest
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_LAMDIS_API_URL: http://api:3001
+      NEXT_PUBLIC_LAMDIS_DEPLOYMENT_MODE: self_hosted
+      NEXT_PUBLIC_LAMDIS_AUTH_MODE: disabled
+    ports:
+      - "3000:3000"
+
+volumes:
+  lamdis-desktop-pgdata:
+  lamdis-desktop-natsdata:

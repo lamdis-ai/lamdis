@@ -1,0 +1,23 @@
+{
+  "name": "lamdis-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Lamdis deployment and secrets management scripts",
+  "scripts": {
+    "sync": "node sync-secrets.js",
+    "sync:github": "node sync-secrets.js --github",
+    "sync:apprunner": "node sync-secrets.js --apprunner",
+    "sync:all": "node sync-secrets.js --all"
+  },
+  "dependencies": {
+    "@aws-sdk/client-apprunner": "^3.700.0",
+    "@aws-sdk/client-s3": "^3.992.0",
+    "@aws-sdk/client-secrets-manager": "^3.700.0",
+    "dotenv": "^16.3.1",
+    "mongodb": "^7.1.0",
+    "stripe": "^14.12.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

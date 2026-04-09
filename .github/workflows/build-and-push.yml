@@ -1,0 +1,139 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      runs: ${{ steps.filter.outputs.runs }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'lamdis-api/**'
+              - 'packages/lamdis-db/**'
+              - 'packages/lamdis-sdk/**'
+            runs:
+              - 'lamdis-runs/**'
+              - 'packages/lamdis-db/**'
+            web:
+              - 'lamdis-web/**'
+
+  build-api:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          GHCR="ghcr.io/${{ github.repository_owner }}/lamdis-api"
+          SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-7)
+          docker build -f lamdis-api/Dockerfile . \
+            -t "${GHCR}:latest" -t "${GHCR}:${SHORT_SHA}"
+          docker push "${GHCR}:latest"
+          docker push "${GHCR}:${SHORT_SHA}"
+      - name: Tag with version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          GHCR="ghcr.io/${{ github.repository_owner }}/lamdis-api"
+          VERSION=${GITHUB_REF#refs/tags/v}
+          docker tag "${GHCR}:latest" "${GHCR}:${VERSION}"
+          docker push "${GHCR}:${VERSION}"
+
+  build-runs:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.runs == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          GHCR="ghcr.io/${{ github.repository_owner }}/lamdis-runs"
+          SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-7)
+          docker build -f lamdis-runs/Dockerfile . \
+            -t "${GHCR}:latest" -t "${GHCR}:${SHORT_SHA}"
+          docker push "${GHCR}:latest"
+          docker push "${GHCR}:${SHORT_SHA}"
+      - name: Tag with version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          GHCR="ghcr.io/${{ github.repository_owner }}/lamdis-runs"
+          VERSION=${GITHUB_REF#refs/tags/v}
+          docker tag "${GHCR}:latest" "${GHCR}:${VERSION}"
+          docker push "${GHCR}:${VERSION}"
+
+  build-web:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          GHCR="ghcr.io/${{ github.repository_owner }}/lamdis-web"
+          SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-7)
+          docker build -f lamdis-web/Dockerfile lamdis-web \
+            --secret id=NPM_TOKEN,env=NPM_TOKEN \
+            -t "${GHCR}:latest" -t "${GHCR}:${SHORT_SHA}"
+          docker push "${GHCR}:latest"
+          docker push "${GHCR}:${SHORT_SHA}"
+        env:
+          NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag with version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          GHCR="ghcr.io/${{ github.repository_owner }}/lamdis-web"
+          VERSION=${GITHUB_REF#refs/tags/v}
+          docker tag "${GHCR}:latest" "${GHCR}:${VERSION}"
+          docker push "${GHCR}:${VERSION}"
+
+  # Notify lamdis-cloud to deploy (optional — triggered via repository_dispatch)
+  notify-cloud:
+    runs-on: ubuntu-latest
+    needs: [build-api, build-runs, build-web]
+    if: always() && github.ref == 'refs/heads/main'
+    steps:
+      - name: Trigger cloud deploy
+        if: secrets.CLOUD_DEPLOY_TOKEN != ''
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.CLOUD_DEPLOY_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository_owner }}/lamdis-cloud/dispatches \
+            -d '{"event_type":"deploy","client_payload":{"sha":"${{ github.sha }}"}}'
+        continue-on-error: true

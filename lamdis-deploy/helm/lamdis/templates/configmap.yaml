@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lamdis.fullname" . }}-config
+  labels:
+    {{- include "lamdis.labels" . | nindent 4 }}
+data:
+  LAMDIS_DEPLOYMENT_MODE: {{ .Values.global.deploymentMode | quote }}
+  LAMDIS_AUTH_MODE: {{ .Values.global.authMode | quote }}
+  LAMDIS_ENTITLEMENTS_MODE: {{ .Values.global.entitlementsMode | quote }}
+  {{- if eq .Values.global.authMode "oidc" }}
+  OIDC_ISSUER: {{ .Values.oidc.issuer | quote }}
+  OIDC_AUDIENCE: {{ .Values.oidc.audience | quote }}
+  OIDC_GROUP_CLAIM: {{ .Values.oidc.groupClaim | quote }}
+  OIDC_ROLE_MAP: {{ .Values.oidc.roleMap | quote }}
+  {{- if .Values.oidc.jwksUri }}
+  OIDC_JWKS_URI: {{ .Values.oidc.jwksUri | quote }}
+  {{- end }}
+  {{- end }}
+  AWS_REGION: {{ .Values.aws.region | quote }}

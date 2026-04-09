@@ -1,0 +1,20 @@
+## ─────────────────────────────────────────────────────────
+## Lamdis Helm Chart — Cloud Overlay
+## ─────────────────────────────────────────────────────────
+## Usage:
+##   helm install lamdis ./helm/lamdis -f ./helm/lamdis/values-cloud.yaml
+##
+
+global:
+  deploymentMode: cloud
+  authMode: auth0
+  entitlementsMode: stripe
+  imageRegistry: ""   # Set to your ECR registry URI
+  imageTag: latest
+
+mongodb:
+  enabled: false
+  externalUri: ""     # Set via K8s Secret
+
+license:
+  secretName: ""      # Not used in cloud mode

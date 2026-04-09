@@ -1,0 +1,7 @@
+import{j as e}from"./jsx-runtime-EKYJJIwR.js";import{r as f}from"./index-JhL3uwfD.js";import{J as x}from"./JsonSchemaBuilder-B2IDKiZY.js";const b={title:"Base/JsonSchemaBuilder",component:x,tags:["autodocs"],argTypes:{variant:{control:"select",options:["dark","light"]}}},v={type:"object",properties:{name:{type:"string"},age:{type:"number"},active:{type:"boolean"}},required:["name"]},s=({initial:o,variant:S="dark"})=>{const[n,j]=f.useState(o);return e.jsxs("div",{children:[e.jsx(x,{value:o,onChange:j,variant:S}),n&&e.jsx("pre",{className:"mt-4 p-3 bg-slate-800 rounded text-xs text-slate-300 overflow-auto",children:JSON.stringify(n,null,2)})]})},r={render:()=>e.jsx(s,{})},t={render:()=>e.jsx(s,{initial:v})},a={render:()=>e.jsx(s,{variant:"light"})};var c,i,m;r.parameters={...r.parameters,docs:{...(c=r.parameters)==null?void 0:c.docs,source:{originalSource:`{
+  render: () => <SchemaDemo />
+}`,...(m=(i=r.parameters)==null?void 0:i.docs)==null?void 0:m.source}}};var p,d,l;t.parameters={...t.parameters,docs:{...(p=t.parameters)==null?void 0:p.docs,source:{originalSource:`{
+  render: () => <SchemaDemo initial={existingSchema} />
+}`,...(l=(d=t.parameters)==null?void 0:d.docs)==null?void 0:l.source}}};var u,h,g;a.parameters={...a.parameters,docs:{...(u=a.parameters)==null?void 0:u.docs,source:{originalSource:`{
+  render: () => <SchemaDemo variant="light" />
+}`,...(g=(h=a.parameters)==null?void 0:h.docs)==null?void 0:g.source}}};const J=["Default","WithExisting","Light"];export{r as Default,a as Light,t as WithExisting,J as __namedExportsOrder,b as default};

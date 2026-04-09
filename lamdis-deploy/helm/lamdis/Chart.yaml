@@ -1,0 +1,17 @@
+apiVersion: v2
+name: lamdis
+description: Lamdis Platform — AI-powered testing platform
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - lamdis
+  - testing
+  - ai
+home: https://lamdis.ai
+sources:
+  - https://github.com/lamdis-ai/lamdis-deploy
+maintainers:
+  - name: Lamdis AI
+    email: support@lamdis.ai
+    url: https://lamdis.ai

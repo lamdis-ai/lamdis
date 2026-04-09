@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lamdis.fullname" . }}-api
+  labels:
+    {{- include "lamdis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.api.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "lamdis.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api

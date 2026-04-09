@@ -1,0 +1,198 @@
+openapi: 3.0.3
+info:
+  title: Lamdis CI/CD Integration API
+  version: 0.1.0
+  description: Endpoints to trigger and query Lamdis test suite runs from CI/CD.
+servers:
+  - url: https://api.lamdis.local
+paths:
+  /v1/developer/api-keys:
+    get:
+      summary: List API keys
+      tags: [Developer]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ApiKey'
+    post:
+      summary: Create API key
+      tags: [Developer]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                scopes:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    $ref: '#/components/schemas/ApiKey'
+                  secret:
+                    type: string
+  /v1/developer/api-keys/{id}:
+    delete:
+      summary: Revoke API key
+      tags: [Developer]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Revoked }
+
+  /v1/integrations/ci/runs:
+    post:
+      summary: Trigger a suite run
+      description: Queue a run of configured suites against a target environment.
+      tags: [CI]
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerRunRequest'
+      responses:
+        '200':
+          description: Queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerRunResponse'
+  /v1/integrations/ci/runs/{runId}:
+    get:
+      summary: Get run status and summary
+      tags: [CI]
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunStatusResponse'
+
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Lamdis
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ApiKey:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+    TriggerRunRequest:
+      type: object
+      required: [suiteId]
+      properties:
+        suiteId:
+          type: string
+          description: ID of the suite to run.
+        envId:
+          type: string
+          description: Environment ID to target.
+        envIds:
+          type: array
+          items: { type: string }
+          description: Multiple environment IDs to run in batch.
+        env:
+          type: object
+          description: Target connection key (alternative to envId).
+          properties:
+            type: { type: string, enum: [connection] }
+            key: { type: string }
+        envs:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [connection] }
+              key: { type: string }
+        tests:
+          type: array
+          items: { type: string }
+          description: Optional subset of test ids to run.
+        source:
+          type: object
+          description: Git context metadata.
+          properties:
+            provider: { type: string, example: github }
+            repository: { type: string, example: owner/repo }
+            commit: { type: string }
+            pullRequest: { type: integer }
+            branch: { type: string }
+        wait:
+          type: boolean
+          default: false
+    TriggerRunResponse:
+      type: object
+      properties:
+        runId: { type: string }
+        status:
+          type: string
+          enum: [queued, running, completed, failed, cancelled]
+        dashboardUrl: { type: string }
+    RunStatusResponse:
+      type: object
+      properties:
+        runId: { type: string }
+        status:
+          type: string
+          enum: [queued, running, completed, failed, cancelled]
+        summary:
+          type: object
+          properties:
+            total: { type: integer }
+            passed: { type: integer }
+            failed: { type: integer }
+            skipped: { type: integer }
+        dashboardUrl: { type: string }

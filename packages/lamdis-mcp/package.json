@@ -1,0 +1,43 @@
+{
+  "name": "@lamdis-ai/mcp",
+  "version": "0.1.0",
+  "description": "Lamdis MCP server for Claude Code — fetch workflows and SDK reference",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "lamdis-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -w -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lamdis-ai/lamdis-mcp.git"
+  },
+  "author": "Lamdis Inc.",
+  "license": "MIT",
+  "keywords": [
+    "lamdis",
+    "mcp",
+    "claude",
+    "workflow",
+    "instrumentation"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^22.0.0"
+  }
+}

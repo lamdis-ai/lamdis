@@ -1,0 +1,21 @@
+{
+  "name": "@lamdis/connect",
+  "version": "0.1.0",
+  "description": "Local bridge — connects your filesystem to the Lamdis agent platform",
+  "type": "module",
+  "bin": {
+    "lamdis-connect": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

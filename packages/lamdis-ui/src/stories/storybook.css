@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom component classes used by the library */
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/50;
+}
+
+.btn-ghost {
+  @apply bg-transparent text-slate-300 hover:bg-white/10;
+}
+
+.btn-gradient {
+  @apply bg-gradient-to-r from-fuchsia-600 to-sky-600 text-white hover:from-fuchsia-500 hover:to-sky-500;
+}
+
+.btn-pattern {
+  @apply bg-transparent text-slate-300 hover:bg-white/5;
+}
+
+.card {
+  @apply rounded-xl border border-slate-700/60 bg-slate-900/60 backdrop-blur-sm;
+}
+
+.card-active {
+  @apply border-fuchsia-500/40 ring-1 ring-fuchsia-500/20;
+}
+
+.tab-btn {
+  @apply relative px-3 py-1.5 text-sm transition-colors;
+}
+
+.tab-btn-indicator {
+  @apply absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r from-fuchsia-500 to-sky-500 transition-opacity;
+}
+
+.scroll-dark {
+  scrollbar-color: #475569 transparent;
+  scrollbar-width: thin;
+}
+
+.rounded-card {
+  @apply rounded-xl;
+}
+
+.rounded-input {
+  @apply rounded-lg;
+}
+
+/* AiLoader keyframe animation */
+@keyframes lamdisBar {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+
+/* Dark autofill override for inputs */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #1e293b inset !important;
+  -webkit-text-fill-color: #e2e8f0 !important;
+  caret-color: #e2e8f0;
+}

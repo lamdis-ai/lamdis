@@ -1,0 +1,45 @@
+{
+  "name": "@lamdis-ai/sdk",
+  "version": "0.1.0",
+  "description": "Lamdis SDK for emitting workflow events and instrumenting business processes",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -w -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lamdis-ai/lamdis-sdk.git"
+  },
+  "author": "Lamdis Inc.",
+  "license": "MIT",
+  "keywords": [
+    "lamdis",
+    "workflow",
+    "events",
+    "observability",
+    "monitoring",
+    "process",
+    "instrumentation"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

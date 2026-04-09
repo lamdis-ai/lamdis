@@ -1,0 +1,11 @@
+import { proxyGet, proxyPost } from '@/lib/apiProxy';
+
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return proxyGet(`/workflows/${id}/checks`);
+}
+
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return proxyPost(`/workflows/${id}/checks`, req);
+}
