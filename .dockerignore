@@ -1,5 +1,8 @@
-node_modules
+**/node_modules
 .git
+lamdis-cloud
+lamdis-mobile
+lamdis-desktop
 .next
 dist
 .turbo

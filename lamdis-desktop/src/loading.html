@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Lamdis</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .container {
+      text-align: center;
+      max-width: 400px;
+    }
+    .logo {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      margin-bottom: 24px;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .status {
+      font-size: 16px;
+      color: #94a3b8;
+      margin-bottom: 32px;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #1e293b;
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 24px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .steps {
+      text-align: left;
+      font-size: 13px;
+      color: #64748b;
+      line-height: 2;
+    }
+    .steps .done { color: #22c55e; }
+    .steps .active { color: #f8fafc; }
+    .steps .pending { color: #334155; }
+    .check { margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">Lamdis</div>
+    <div class="spinner"></div>
+    <div class="status" id="status">Starting services...</div>
+    <div class="steps">
+      <div id="step-docker" class="active"><span class="check">&#9679;</span> Connecting to Docker</div>
+      <div id="step-pull" class="pending"><span class="check">&#9679;</span> Pulling images</div>
+      <div id="step-db" class="pending"><span class="check">&#9679;</span> Starting database</div>
+      <div id="step-api" class="pending"><span class="check">&#9679;</span> Starting API</div>
+      <div id="step-web" class="pending"><span class="check">&#9679;</span> Starting dashboard</div>
+    </div>
+  </div>
+</body>
+</html>

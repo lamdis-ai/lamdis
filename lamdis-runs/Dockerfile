@@ -18,9 +18,9 @@ RUN npm ci --workspace=lamdis-runs --workspace=@lamdis/db
 
 # --- Build ---
 FROM base AS build
+
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/lamdis-runs/node_modules ./lamdis-runs/node_modules 2>/dev/null || true
-COPY --from=deps /app/packages/lamdis-db/node_modules ./packages/lamdis-db/node_modules 2>/dev/null || true
+COPY --from=deps /app/package-lock.json ./
 
 COPY packages/lamdis-db ./packages/lamdis-db
 COPY lamdis-runs ./lamdis-runs
@@ -36,7 +36,7 @@ WORKDIR /app
 
 COPY --from=build /app/lamdis-runs/dist ./dist
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages ./packages
+COPY --from=build /app/packages ./packages
 COPY lamdis-runs/package.json ./
 
 EXPOSE 3101
