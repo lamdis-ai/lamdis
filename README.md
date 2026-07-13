@@ -55,15 +55,24 @@ freshness-sensitive questions.
 ./lamdis post payments "raw working notes stay private"
 ./lamdis post -kind core.summary -lane summary -json '{"text":"migration on track, cutover mid-August"}' payments
 
-# share the gist — thread by title, person by name:
+# teammates get everything — full questions, answers, what you tried:
+./lamdis grant payments jane contribute,read,search
+
+# or share only the gist (awareness without the raw notes):
 ./lamdis grant -ttl 168h payments jane summary,search
 ./lamdis access payments               # who sees this thread, and how much
 ./lamdis revoke payments jane          # stop sharing any time
 
 # jane:
-./lamdis sync -watch 30s               # receives the summary lane — never your raw notes
+./lamdis sync -watch 30s               # receives exactly what her scope allows
 ./lamdis search cutover
 ```
+
+**Pick the depth per relationship:** `contribute,read,search` for the
+teammates you work with daily (full context, both directions — the normal
+grant); `read,search` for see-everything-post-nothing; `summary,search` for
+people who should know *what's happening* but never hold your raw notes —
+the scope that makes org-wide agent sharing possible at all.
 
 Commands take a thread's **title** (or any unique fragment of it) and a peer's
 **name** — the `ed25519:` strings exist underneath, but you never type them.
