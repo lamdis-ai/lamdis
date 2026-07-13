@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lamdis.dev/schemas/v0/entry.schema.json",
+  "title": "Entry",
+  "description": "The only unit of data in the Lamdis Protocol. Immutable, signed, hash-chained per (thread, author, lane). SPDX-License-Identifier: Apache-2.0",
+  "type": "object",
+  "required": ["v", "id", "thread", "kind", "lane", "author", "seq", "lamport", "prev", "ts", "body", "sig"],
+  "additionalProperties": false,
+  "properties": {
+    "v": {
+      "description": "Protocol envelope version. Fixed at 0 until spec v0.1 freezes.",
+      "type": "integer",
+      "const": 0
+    },
+    "id": {
+      "description": "ULID, assigned by the author at creation. Unique per entry; sortable tiebreaker only — ordering authority is (lamport, author).",
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "thread": {
+      "description": "Thread id: the entry id of the thread's genesis entry (kind core.thread).",
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "kind": {
+      "description": "Reverse-DNS namespaced entry kind. core.* is reserved for the spec. Nodes MUST replicate, store, and serve unknown kinds opaquely (must-replicate, may-ignore).",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(\\.[a-z0-9_]+)+$",
+      "maxLength": 255
+    },
+    "lane": {
+      "description": "Replication/permission class. control: membership, grants, delegations — replicated to every member at every scope. summary: tier>=1 summaries and thread cards. content: everything else.",
+      "enum": ["control", "summary", "content"]
+    },
+    "author": {
+      "description": "Principal id of the signer: 'ed25519:' + base32-crockford(pubkey). A person key or a delegated agent key.",
+      "type": "string",
+      "pattern": "^ed25519:[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{52}$"
+    },
+    "on_behalf_of": {
+      "description": "Person principal id when the author is a delegated agent key. Provenance MUST bottom out at a person.",
+      "type": "string",
+      "pattern": "^ed25519:[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{52}$"
+    },
+    "seq": {
+      "description": "Per-(thread, author, lane) sequence number, starting at 1, no gaps. Basis of version-vector sync.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "lamport": {
+      "description": "Lamport clock: greater than every lamport the author had observed in this thread when authoring. Total order = (lamport, author, id).",
+      "type": "integer",
+      "minimum": 1
+    },
+    "prev": {
+      "description": "Lowercase hex SHA-256 of the previous entry by the same (thread, author, lane) chain, or 64 zeros for the first entry in a chain.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ts": {
+      "description": "Author-asserted RFC 3339 UTC timestamp. Display only — never an ordering authority.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "refs": {
+      "description": "Typed references to other entries. All values are entry ids unless noted.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "derived_from": {
+          "description": "Provenance: entries this one was computed/summarized from.",
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 4096
+        },
+        "replies_to": { "type": "string" },
+        "supersedes": {
+          "description": "This entry replaces the referenced one (edits, living digests). Readers resolve to the latest non-superseded entry.",
+          "type": "string"
+        },
+        "covers": {
+          "description": "For summaries: the contiguous range of content this summary covers, as entry ids.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "to"],
+          "properties": {
+            "from": { "type": "string" },
+            "to": { "type": "string" }
+          }
+        }
+      }
+    },
+    "body": {
+      "description": "Kind-defined JSON body. Kinds SHOULD put human/agent-readable prose in body.text — nodes index body.text for FTS and vector search when present.",
+      "type": "object"
+    },
+    "sig": {
+      "description": "Lowercase hex Ed25519 signature by author over the canonical JSON of the entry with sig omitted (see spec/protocol.md#canonical-encoding).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    }
+  }
+}
