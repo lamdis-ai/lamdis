@@ -85,6 +85,10 @@ type State struct {
 	// concurrent grant (same lamport, later in tiebreak order) cannot win:
 	// deny beats grant under concurrency.
 	deniedAt map[string]uint64
+	// contribAt maps principal → lamport of the earliest grant that included
+	// contribute. Together with deniedAt it bounds the window in which the
+	// principal's authored entries are ingestible (MayContribute).
+	contribAt map[string]uint64
 }
 
 // Fold computes permission state from a thread's entries. Pass entries in
@@ -98,6 +102,7 @@ func Fold(threadID string, entries []*protolog.Entry) *State {
 		expiry:      map[string]time.Time{},
 		delegations: map[string]string{},
 		deniedAt:    map[string]uint64{},
+		contribAt:   map[string]uint64{},
 	}
 	for _, e := range entries {
 		if e.Lane != protolog.LaneControl || e.Thread != threadID {
@@ -194,6 +199,11 @@ func (st *State) apply(e *protolog.Entry) {
 			return
 		}
 		st.grants[body.Principal] = ss
+		if ss.Has(ScopeContribute) {
+			if at, ok := st.contribAt[body.Principal]; !ok || e.Lamport < at {
+				st.contribAt[body.Principal] = e.Lamport
+			}
+		}
 		if body.TTLSeconds > 0 {
 			if ts, err := time.Parse(time.RFC3339, e.TS); err == nil {
 				st.expiry[body.Principal] = ts.Add(time.Duration(body.TTLSeconds) * time.Second)
@@ -247,4 +257,41 @@ func (st *State) EffectiveScopes(p string, now time.Time) ScopeSet {
 // p replicate from this thread right now. Empty means none (deny).
 func (st *State) Lanes(p string, now time.Time) []protolog.Lane {
 	return st.EffectiveScopes(p, now).Lanes()
+}
+
+// MayContribute reports whether entries authored by principal p at the given
+// lamport clock are ingestible: stewards always; granted principals within
+// their [grant, revoke) lamport window. The window keeps a collaborator's
+// pre-revocation history syncable to fresh replicas without letting them
+// author anything new. Caveat (documented in the spec): lamport is
+// author-asserted, so a revoked author could backdate; v1 accepts this in
+// the honest-node threat model.
+func (st *State) MayContribute(p string, lamport uint64) bool {
+	if person, ok := st.delegations[p]; ok {
+		p = person
+	}
+	if st.Stewards[p] {
+		return true
+	}
+	grantAt, ok := st.contribAt[p]
+	if !ok || lamport < grantAt {
+		return false
+	}
+	if end, denied := st.deniedAt[p]; denied && end >= grantAt && lamport >= end {
+		return false
+	}
+	// Also honor TTL expiry for *currently* held grants: if the principal
+	// still holds contribute now the window is open; if the grant expired,
+	// only history before the denial stands (expiry has no lamport, so an
+	// expired-but-never-revoked grant keeps its window open in v1).
+	return true
+}
+
+// ActsFor reports whether author is principal itself or an agent key
+// currently delegated to principal.
+func (st *State) ActsFor(author, principal string) bool {
+	if author == principal {
+		return true
+	}
+	return st.delegations[author] == principal
 }

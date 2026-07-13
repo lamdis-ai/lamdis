@@ -29,15 +29,30 @@ type PullRequest struct {
 	Have   []Head `json:"have"`
 }
 
-// PullResponse carries missing entries in per-chain seq order.
+// PullResponse carries missing entries in per-chain seq order, plus the
+// server's own heads (scoped to the caller's lanes) so the caller can
+// compute what the server is missing and push it back.
 type PullResponse struct {
 	Entries []*protolog.Entry `json:"entries"`
+	Heads   []Head            `json:"heads"`
+}
+
+// PushRequest offers entries authored by the caller (or its delegated keys).
+type PushRequest struct {
+	Thread  string            `json:"thread"`
+	Entries []*protolog.Entry `json:"entries"`
+}
+
+// PushResponse reports how many entries the server admitted.
+type PushResponse struct {
+	Accepted int `json:"accepted"`
 }
 
 // Transport is what a client needs from a remote peer.
 type Transport interface {
 	List(ctx context.Context) ([]string, error)
 	Pull(ctx context.Context, req PullRequest) (*PullResponse, error)
+	Push(ctx context.Context, req PushRequest) (*PushResponse, error)
 }
 
 // Server answers List/Pull against a local store, enforcing permissions.
@@ -107,10 +122,11 @@ func (s *Server) Pull(ctx context.Context, principal string, req PullRequest) (*
 		return nil, err
 	}
 	resp := &PullResponse{}
-	for key := range tl.Heads() {
+	for key, seq := range tl.Heads() {
 		if !permitted[key.Lane] {
 			continue
 		}
+		resp.Heads = append(resp.Heads, Head{Author: key.Author, Lane: key.Lane, Seq: seq})
 		for _, e := range tl.After(key, have[key]) {
 			resp.Entries = append(resp.Entries, e)
 		}
@@ -118,10 +134,55 @@ func (s *Server) Pull(ctx context.Context, principal string, req PullRequest) (*
 	return resp, nil
 }
 
-// Client pulls threads from one remote peer into the local store.
+// Push admits entries offered by principal. Rules, all fail-closed:
+// every entry is authored by the caller (or a key delegated to the caller),
+// the author holds contribute in the thread's fold, and only summary and
+// content lanes are writable remotely (control-lane writes are steward
+// actions taken on the steward's own node; access requests come later).
+func (s *Server) Push(ctx context.Context, principal string, req PushRequest) (*PushResponse, error) {
+	lanes, err := s.visibleLanes(ctx, req.Thread, principal)
+	if err != nil || len(lanes) == 0 {
+		return nil, fmt.Errorf("thread %s not found", req.Thread)
+	}
+	tl, err := s.Store.Thread(ctx, req.Thread)
+	if err != nil {
+		return nil, err
+	}
+	st := perm.Fold(req.Thread, tl.Entries())
+	for _, e := range req.Entries {
+		if e.Thread != req.Thread {
+			return nil, fmt.Errorf("entry %s belongs to another thread", e.ID)
+		}
+		if e.Lane != protolog.LaneSummary && e.Lane != protolog.LaneContent {
+			return nil, fmt.Errorf("entry %s: lane %s is not remotely writable", e.ID, e.Lane)
+		}
+		if !st.ActsFor(e.Author, principal) {
+			return nil, fmt.Errorf("entry %s: author is not the authenticated principal", e.ID)
+		}
+		if !st.MayContribute(e.Author, e.Lamport) {
+			return nil, fmt.Errorf("entry %s: author lacks contribute on this thread", e.ID)
+		}
+	}
+	ordered := orderForAppend(req.Entries, req.Thread)
+	if err := s.Store.AppendEntries(ctx, ordered); err != nil {
+		return nil, err
+	}
+	return &PushResponse{Accepted: len(ordered)}, nil
+}
+
+// Client syncs threads with one remote peer: pull everything permitted,
+// then push back chains authored by us that the peer is missing.
 type Client struct {
 	Store store.Store
 	Peer  Transport
+	// Self is the local principal; chains authored by Self (or listed in
+	// SelfKeys) are offered back to the peer after each pull.
+	Self     string
+	SelfKeys map[string]bool // additional local authors (delegated agent keys)
+}
+
+func (c *Client) actsAsSelf(author string) bool {
+	return author == c.Self || c.SelfKeys[author]
 }
 
 // SyncAll lists remote-visible threads and pulls each. Returns per-thread
@@ -142,9 +203,11 @@ func (c *Client) SyncAll(ctx context.Context) (map[string]int, error) {
 	return counts, nil
 }
 
-// SyncThread pulls one thread. It sends our current heads and appends
-// whatever comes back; the store re-validates every signature and chain
-// position, so a malicious peer cannot inject an invalid entry.
+// SyncThread pulls one thread, then pushes back our own missing chains.
+// Ingestion is defended in depth: the store re-validates every signature
+// and chain position, and non-control entries are admitted only if their
+// author holds contribute in the thread's fold — a compromised peer cannot
+// hand us entries its members were never authorized to write.
 func (c *Client) SyncThread(ctx context.Context, threadID string) (int, error) {
 	var have []Head
 	if tl, err := c.Store.Thread(ctx, threadID); err == nil {
@@ -156,16 +219,83 @@ func (c *Client) SyncThread(ctx context.Context, threadID string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if len(resp.Entries) == 0 {
+	n := 0
+	if len(resp.Entries) > 0 {
+		ordered := orderForAppend(resp.Entries, threadID)
+		// Control entries land first (orderForAppend), so the fold below
+		// already reflects any grants that arrived in this same pull.
+		var control, rest []*protolog.Entry
+		for _, e := range ordered {
+			if e.Lane == protolog.LaneControl {
+				control = append(control, e)
+			} else {
+				rest = append(rest, e)
+			}
+		}
+		if len(control) > 0 {
+			if err := c.Store.AppendEntries(ctx, control); err != nil {
+				return 0, err
+			}
+		}
+		if len(rest) > 0 {
+			tl, err := c.Store.Thread(ctx, threadID)
+			if err != nil {
+				return 0, err
+			}
+			st := perm.Fold(threadID, tl.Entries())
+			for _, e := range rest {
+				if !st.MayContribute(e.Author, e.Lamport) {
+					return 0, fmt.Errorf("entry %s: author lacks contribute; refusing peer's unauthorized data", e.ID)
+				}
+			}
+			if err := c.Store.AppendEntries(ctx, rest); err != nil {
+				return 0, err
+			}
+		}
+		n = len(ordered)
+	}
+	pushed, err := c.pushBack(ctx, threadID, resp.Heads)
+	if err != nil {
+		return n, err
+	}
+	return n + pushed, nil
+}
+
+// pushBack offers the peer whatever our own summary/content chains hold
+// beyond the peer's heads. Only self-authored chains are pushed: everyone
+// syncs their own writing; everything else arrives by pull.
+func (c *Client) pushBack(ctx context.Context, threadID string, peerHeads []Head) (int, error) {
+	if c.Self == "" {
+		return 0, nil // pull-only client
+	}
+	tl, err := c.Store.Thread(ctx, threadID)
+	if err != nil {
+		return 0, nil // nothing local to push
+	}
+	peerSeq := map[protolog.ChainKey]uint64{}
+	for _, h := range peerHeads {
+		peerSeq[protolog.ChainKey{Thread: threadID, Author: h.Author, Lane: h.Lane}] = h.Seq
+	}
+	var offer []*protolog.Entry
+	for key, seq := range tl.Heads() {
+		if !c.actsAsSelf(key.Author) {
+			continue
+		}
+		if key.Lane != protolog.LaneSummary && key.Lane != protolog.LaneContent {
+			continue
+		}
+		if seq > peerSeq[key] {
+			offer = append(offer, tl.After(key, peerSeq[key])...)
+		}
+	}
+	if len(offer) == 0 {
 		return 0, nil
 	}
-	// Order chains so the control lane (and each chain's low seqs) land
-	// first: genesis must exist before other chains reference the thread.
-	ordered := orderForAppend(resp.Entries, threadID)
-	if err := c.Store.AppendEntries(ctx, ordered); err != nil {
-		return 0, err
+	resp, err := c.Peer.Push(ctx, PushRequest{Thread: threadID, Entries: offer})
+	if err != nil {
+		return 0, fmt.Errorf("push: %w", err)
 	}
-	return len(ordered), nil
+	return resp.Accepted, nil
 }
 
 // orderForAppend sorts pulled entries so appends satisfy chain rules:

@@ -204,7 +204,13 @@ func cmdServe(dataDir string, s store.Store, args []string) error {
 }
 
 func cmdSync(ctx context.Context, dataDir string, s store.Store, args []string) error {
-	priv, _, err := loadKey(dataDir)
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	watch := fs.Duration("watch", 0, "keep syncing on this interval (e.g. 30s); 0 = once")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	priv, pid, err := loadKey(dataDir)
 	if err != nil {
 		return err
 	}
@@ -212,30 +218,44 @@ func cmdSync(ctx context.Context, dataDir string, s store.Store, args []string) 
 	if err != nil {
 		return err
 	}
-	if len(args) == 1 {
-		url, ok := peers[args[0]]
+	if len(rest) == 1 {
+		url, ok := peers[rest[0]]
 		if !ok {
-			return fmt.Errorf("unknown peer %q (add with `lamdis peer add`)", args[0])
+			return fmt.Errorf("unknown peer %q (add with `lamdis peer add`)", rest[0])
 		}
-		peers = map[string]string{args[0]: url}
+		peers = map[string]string{rest[0]: url}
 	}
 	if len(peers) == 0 {
 		return fmt.Errorf("no peers configured (add with `lamdis peer add <name> <url>`)")
 	}
-	for name, url := range peers {
-		client := &syncp.Client{Store: s, Peer: api.NewHTTPTransport(url, priv)}
-		counts, err := client.SyncAll(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "lamdis: sync %s: %v\n", name, err)
-			continue
+	round := func() {
+		for name, url := range peers {
+			client := &syncp.Client{Store: s, Peer: api.NewHTTPTransport(url, priv), Self: pid}
+			counts, err := client.SyncAll(ctx)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "lamdis: sync %s: %v\n", name, err)
+				continue
+			}
+			total := 0
+			for _, n := range counts {
+				total += n
+			}
+			if *watch == 0 || total > 0 {
+				fmt.Printf("%s: %d threads visible, %d entries exchanged\n", name, len(counts), total)
+			}
 		}
-		total := 0
-		for _, n := range counts {
-			total += n
-		}
-		fmt.Printf("%s: %d threads visible, %d new entries\n", name, len(counts), total)
+		drainEmbeds(ctx, s)
 	}
-	drainEmbeds(ctx, s)
+	round()
+	if *watch <= 0 {
+		return nil
+	}
+	fmt.Printf("watching every %s (ctrl-c to stop)\n", *watch)
+	tick := time.NewTicker(*watch)
+	defer tick.Stop()
+	for range tick.C {
+		round()
+	}
 	return nil
 }
 

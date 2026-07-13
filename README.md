@@ -22,7 +22,8 @@ Early — M0 (core node) in progress:
 - [x] CLI: `init`, `thread new`, `post`, `read`, `search`
 - [x] Permission engine: person-signed grants, four scopes, deny-wins fold, TTL, delegations (`node/internal/perm`)
 - [x] P2P sync: signed HTTP between paired nodes, permission-filtered serving — a summary-scoped peer never receives a content byte (`node/internal/sync`, `node/internal/api`)
-- [x] CLI: `serve`, `peer add`, `sync`, `grant`, `revoke`, `access`
+- [x] CLI: `serve`, `peer add`, `sync [-watch 30s]`, `grant`, `revoke`, `access`
+- [x] Bidirectional sync: push verb with contribute enforcement on both ends — peers can only upload what their grant window allows, and clients refuse unauthorized data relayed by a compromised peer
 - [ ] MCP server · access-request/approval inbox UI · hub mode & federation · Postgres/pgvector driver · libp2p transport
 
 ## Two-person quickstart (you + a coworker)
@@ -40,9 +41,18 @@ T=$(./lamdis thread new "q3 payments migration")
 
 # coworker:
 ./lamdis peer add you http://<your-host>:8420
-./lamdis sync                        # pulls the summary lane — never your raw notes
+./lamdis sync -watch 30s             # pulls the summary lane — never your raw notes
 ./lamdis search cutover
 ```
+
+With a `contribute,read` grant instead, your coworker's posts flow back to
+your node on their next sync — full two-way collaboration, each side owning
+its own store. Both machines must be reachable from each other (LAN, VPN,
+or SSH/SSM tunnels through a host you both already access). An always-on
+rendezvous hub — a node on shared infrastructure that both sides sync
+against so neither laptop needs to reach the other — is the next milestone:
+it requires a steward-granted hub role so the relay itself holds replicas
+without being a person.
 
 ## Quickstart
 

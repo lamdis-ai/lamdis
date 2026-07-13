@@ -95,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/sync/list", s.withAuth(s.handleList))
 	mux.HandleFunc("POST /v1/sync/pull", s.withAuth(s.handlePull))
+	mux.HandleFunc("POST /v1/sync/push", s.withAuth(s.handlePush))
 	return mux
 }
 
@@ -139,6 +140,21 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request, principal st
 	if err != nil {
 		// Not-found and not-permitted are deliberately the same status.
 		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, resp)
+}
+
+func (s *Server) handlePush(w http.ResponseWriter, r *http.Request, principal string, body []byte) {
+	var req syncp.PushRequest
+	if err := json.Unmarshal(body, &req); err != nil || req.Thread == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	resp, err := s.Sync.Push(r.Context(), principal, req)
+	if err != nil {
+		// Same shape as pull: no oracle distinguishing missing/forbidden/invalid.
+		http.Error(w, "rejected", http.StatusForbidden)
 		return
 	}
 	writeJSON(w, resp)
@@ -193,6 +209,14 @@ func (t *HTTPTransport) List(ctx context.Context) ([]string, error) {
 func (t *HTTPTransport) Pull(ctx context.Context, req syncp.PullRequest) (*syncp.PullResponse, error) {
 	var out syncp.PullResponse
 	if err := t.post(ctx, "/v1/sync/pull", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (t *HTTPTransport) Push(ctx context.Context, req syncp.PushRequest) (*syncp.PushResponse, error) {
+	var out syncp.PushResponse
+	if err := t.post(ctx, "/v1/sync/push", req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

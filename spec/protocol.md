@@ -60,6 +60,19 @@ signatures and chain position; a gap, fork, or bad signature rejects the
 entry. Sync is always evaluated *as a principal*: the serving node filters
 lanes by the requester's effective scope before streaming.
 
+Three verbs: **List** (threads visible to the caller at any scope),
+**Pull** (entries after the caller's heads, lane-filtered; the response
+carries the server's own heads), **Push** (the caller offers entries it or
+its delegated keys authored). Push rules, all fail-closed: author must be
+the authenticated principal or a key delegated to it; author must hold
+contribute within its `[grant, revoke)` lamport window; only summary and
+content lanes are remotely writable. Receivers apply the same
+`MayContribute` window check when ingesting pulled entries, so a
+compromised peer cannot relay data its members were never authorized to
+write. (Caveat, stated in the threat model: lamport is author-asserted, so
+a revoked author could backdate within its old window; v1 accepts this
+under honest-node assumptions.)
+
 ## 4. Scopes and grants (normative core, implementation pending)
 
 Four composable scopes, fixed in v1: `contribute`, `read`, `summary`,
