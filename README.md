@@ -43,20 +43,30 @@ freshness-sensitive questions.
 
 ```sh
 # each of you, once:
-./lamdis init                        # prints your person principal (share it)
-./lamdis serve -addr :8420           # keep running (LAN, Tailscale, or port-forward)
+./lamdis init                          # creates your identity (a keypair)
+./lamdis serve -addr :8420             # keep running (LAN, Tailscale, or tunnel)
 
-# you:
-T=$(./lamdis thread new "q3 payments migration")
-./lamdis post $T "raw working notes stay private"
-./lamdis post -kind core.summary -lane summary -json '{"text":"migration on track, cutover mid-August"}' $T
-./lamdis grant -ttl 168h $T ed25519:<coworker-principal> summary,search
+# pair by URL — identities are exchanged automatically, like adding a contact:
+./lamdis peer add jane http://<janes-host>:8420
+#   ✓ paired with jane (ed25519:QZHP…)
 
-# coworker:
-./lamdis peer add you http://<your-host>:8420
-./lamdis sync -watch 30s             # pulls the summary lane — never your raw notes
+# you, working:
+./lamdis thread new "q3 payments migration"
+./lamdis post payments "raw working notes stay private"
+./lamdis post -kind core.summary -lane summary -json '{"text":"migration on track, cutover mid-August"}' payments
+
+# share the gist — thread by title, person by name:
+./lamdis grant -ttl 168h payments jane summary,search
+./lamdis access payments               # who sees this thread, and how much
+./lamdis revoke payments jane          # stop sharing any time
+
+# jane:
+./lamdis sync -watch 30s               # receives the summary lane — never your raw notes
 ./lamdis search cutover
 ```
+
+Commands take a thread's **title** (or any unique fragment of it) and a peer's
+**name** — the `ed25519:` strings exist underneath, but you never type them.
 
 With a `contribute,read` grant instead, your coworker's posts flow back to
 your node on their next sync — full two-way collaboration, each side owning

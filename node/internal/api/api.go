@@ -81,7 +81,10 @@ func authenticate(r *http.Request, body []byte, now time.Time) (string, error) {
 // Server exposes the sync protocol over HTTP.
 type Server struct {
 	Sync *syncp.Server
-	Now  func() time.Time
+	// Principal is this node's person principal id, served unauthenticated
+	// at /v1/node so pairing can exchange identities automatically.
+	Principal string
+	Now       func() time.Time
 }
 
 func (s *Server) now() time.Time {
@@ -93,10 +96,41 @@ func (s *Server) now() time.Time {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// Node identity is public by design: it's how two people pair. It reveals
+	// nothing about threads or content.
+	mux.HandleFunc("GET /v1/node", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]string{"principal": s.Principal})
+	})
 	mux.HandleFunc("POST /v1/sync/list", s.withAuth(s.handleList))
 	mux.HandleFunc("POST /v1/sync/pull", s.withAuth(s.handlePull))
 	mux.HandleFunc("POST /v1/sync/push", s.withAuth(s.handlePush))
 	return mux
+}
+
+// FetchNodeInfo returns the principal a node at baseURL identifies as.
+func FetchNodeInfo(ctx context.Context, baseURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/node", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("node info: %s", resp.Status)
+	}
+	var out struct {
+		Principal string `json:"principal"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if _, err := protolog.PublicKey(out.Principal); err != nil {
+		return "", fmt.Errorf("node returned an invalid principal: %w", err)
+	}
+	return out.Principal, nil
 }
 
 func (s *Server) withAuth(next func(w http.ResponseWriter, r *http.Request, principal string, body []byte)) http.HandlerFunc {
