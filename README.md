@@ -20,7 +20,29 @@ Early — M0 (core node) in progress:
 - [x] SQLite store: FTS5 (porter) + local vector index + RRF hybrid search, lane-scoped in-query (`node/internal/store`)
 - [x] Embedder: one OpenAI-compatible wire shape (OpenAI / Ollama / LM Studio / llama.cpp) (`node/internal/embed`)
 - [x] CLI: `init`, `thread new`, `post`, `read`, `search`
-- [ ] REST + scoped keys · MCP server · grants + approval inbox · hub & P2P sync · Postgres/pgvector driver
+- [x] Permission engine: person-signed grants, four scopes, deny-wins fold, TTL, delegations (`node/internal/perm`)
+- [x] P2P sync: signed HTTP between paired nodes, permission-filtered serving — a summary-scoped peer never receives a content byte (`node/internal/sync`, `node/internal/api`)
+- [x] CLI: `serve`, `peer add`, `sync`, `grant`, `revoke`, `access`
+- [ ] MCP server · access-request/approval inbox UI · hub mode & federation · Postgres/pgvector driver · libp2p transport
+
+## Two-person quickstart (you + a coworker)
+
+```sh
+# each of you, once:
+./lamdis init                        # prints your person principal (share it)
+./lamdis serve -addr :8420           # keep running (LAN, Tailscale, or port-forward)
+
+# you:
+T=$(./lamdis thread new "q3 payments migration")
+./lamdis post $T "raw working notes stay private"
+./lamdis post -kind core.summary -lane summary -json '{"text":"migration on track, cutover mid-August"}' $T
+./lamdis grant -ttl 168h $T ed25519:<coworker-principal> summary,search
+
+# coworker:
+./lamdis peer add you http://<your-host>:8420
+./lamdis sync                        # pulls the summary lane — never your raw notes
+./lamdis search cutover
+```
 
 ## Quickstart
 

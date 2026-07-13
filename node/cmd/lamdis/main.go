@@ -10,13 +10,18 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/lamdis-ai/lamdis-protocol/node/internal/api"
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/embed"
 	protolog "github.com/lamdis-ai/lamdis-protocol/node/internal/log"
+	"github.com/lamdis-ai/lamdis-protocol/node/internal/perm"
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/store"
+	syncp "github.com/lamdis-ai/lamdis-protocol/node/internal/sync"
 )
 
 func main() {
@@ -38,6 +43,16 @@ commands:
   post -kind K -lane L ...    append any kind/lane (body from -text or -json)
   read <thread>               print a thread's entries (all lanes)
   search <query>              hybrid search across all local threads
+
+  serve [-addr :8420]         serve sync to peers (run this; give peers your URL)
+  peer add <name> <url>       remember a peer node
+  peers                       list peers
+  sync [peer]                 pull permitted threads from peers (default: all)
+
+  grant <thread> <person> <scopes>   grant scopes (comma-sep: summary,search,read,contribute)
+       [-ttl 168h]                   optional expiry
+  revoke <thread> <person>           revoke all scopes
+  access <thread>                    show stewards and effective grants
 
 environment:
   LAMDIS_DATA        data directory (default ~/.lamdis)
@@ -105,9 +120,209 @@ func run(args []string) error {
 			return usage()
 		}
 		return cmdSearch(ctx, s, strings.Join(rest, " "))
+	case "serve":
+		return cmdServe(*dataDir, s, rest)
+	case "peer":
+		if len(rest) == 3 && rest[0] == "add" {
+			return cmdPeerAdd(*dataDir, rest[1], rest[2])
+		}
+		return usage()
+	case "peers":
+		return cmdPeers(*dataDir)
+	case "sync":
+		return cmdSync(ctx, *dataDir, s, rest)
+	case "grant":
+		return cmdGrant(ctx, *dataDir, s, rest)
+	case "revoke":
+		if len(rest) != 2 {
+			return usage()
+		}
+		return cmdGrantWrite(ctx, *dataDir, s, protolog.KindRevoke, rest[0],
+			map[string]any{"principal": rest[1]})
+	case "access":
+		if len(rest) != 1 {
+			return usage()
+		}
+		return cmdAccess(ctx, s, rest[0])
 	default:
 		return usage()
 	}
+}
+
+func peersPath(dataDir string) string { return filepath.Join(dataDir, "peers.json") }
+
+func loadPeers(dataDir string) (map[string]string, error) {
+	peers := map[string]string{}
+	raw, err := os.ReadFile(peersPath(dataDir))
+	if os.IsNotExist(err) {
+		return peers, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return peers, json.Unmarshal(raw, &peers)
+}
+
+func cmdPeerAdd(dataDir, name, url string) error {
+	peers, err := loadPeers(dataDir)
+	if err != nil {
+		return err
+	}
+	peers[name] = strings.TrimRight(url, "/")
+	raw, _ := json.MarshalIndent(peers, "", "  ")
+	if err := os.WriteFile(peersPath(dataDir), raw, 0o600); err != nil {
+		return err
+	}
+	fmt.Printf("peer %s -> %s\n", name, peers[name])
+	return nil
+}
+
+func cmdPeers(dataDir string) error {
+	peers, err := loadPeers(dataDir)
+	if err != nil {
+		return err
+	}
+	for name, url := range peers {
+		fmt.Printf("%s  %s\n", name, url)
+	}
+	return nil
+}
+
+func cmdServe(dataDir string, s store.Store, args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	addr := fs.String("addr", ":8420", "listen address")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	_, pid, err := loadKey(dataDir)
+	if err != nil {
+		return err
+	}
+	srv := &api.Server{Sync: &syncp.Server{Store: s}}
+	fmt.Printf("lamdis node serving on %s\nprincipal: %s\ngive peers this URL; grants decide what they can pull\n", *addr, pid)
+	return http.ListenAndServe(*addr, srv.Handler())
+}
+
+func cmdSync(ctx context.Context, dataDir string, s store.Store, args []string) error {
+	priv, _, err := loadKey(dataDir)
+	if err != nil {
+		return err
+	}
+	peers, err := loadPeers(dataDir)
+	if err != nil {
+		return err
+	}
+	if len(args) == 1 {
+		url, ok := peers[args[0]]
+		if !ok {
+			return fmt.Errorf("unknown peer %q (add with `lamdis peer add`)", args[0])
+		}
+		peers = map[string]string{args[0]: url}
+	}
+	if len(peers) == 0 {
+		return fmt.Errorf("no peers configured (add with `lamdis peer add <name> <url>`)")
+	}
+	for name, url := range peers {
+		client := &syncp.Client{Store: s, Peer: api.NewHTTPTransport(url, priv)}
+		counts, err := client.SyncAll(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "lamdis: sync %s: %v\n", name, err)
+			continue
+		}
+		total := 0
+		for _, n := range counts {
+			total += n
+		}
+		fmt.Printf("%s: %d threads visible, %d new entries\n", name, len(counts), total)
+	}
+	drainEmbeds(ctx, s)
+	return nil
+}
+
+func cmdGrant(ctx context.Context, dataDir string, s store.Store, args []string) error {
+	fs := flag.NewFlagSet("grant", flag.ContinueOnError)
+	ttl := fs.Duration("ttl", 0, "grant expiry (e.g. 168h); 0 = no expiry")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) != 3 {
+		return fmt.Errorf("usage: grant [-ttl 168h] <thread> <person-principal> <scope,scope>")
+	}
+	thread, principal, scopesArg := rest[0], rest[1], rest[2]
+	var scopes []string
+	for _, sc := range strings.Split(scopesArg, ",") {
+		sc = strings.TrimSpace(sc)
+		if !perm.ValidScope(perm.Scope(sc)) {
+			return fmt.Errorf("invalid scope %q (valid: contribute, read, summary, search)", sc)
+		}
+		scopes = append(scopes, sc)
+	}
+	body := map[string]any{"principal": principal, "scopes": scopes}
+	if *ttl > 0 {
+		body["ttl_seconds"] = int64(ttl.Seconds())
+	}
+	return cmdGrantWrite(ctx, dataDir, s, protolog.KindGrant, thread, body)
+}
+
+// cmdGrantWrite signs a control-lane entry with the PERSON key. This CLI
+// invocation is the human approval step: only a human at this keyboard
+// holds the person key.
+func cmdGrantWrite(ctx context.Context, dataDir string, s store.Store, kind, thread string, body map[string]any) error {
+	priv, _, err := loadKey(dataDir)
+	if err != nil {
+		return err
+	}
+	tl, err := s.Thread(ctx, thread)
+	if err != nil {
+		return err
+	}
+	a, err := protolog.NewAuthor(tl, priv)
+	if err != nil {
+		return err
+	}
+	e, err := a.Append(protolog.Draft{Kind: kind, Lane: protolog.LaneControl, Body: body})
+	if err != nil {
+		return err
+	}
+	if err := s.AppendEntries(ctx, []*protolog.Entry{e}); err != nil {
+		return err
+	}
+	fmt.Println(e.ID)
+	return nil
+}
+
+func cmdAccess(ctx context.Context, s store.Store, thread string) error {
+	tl, err := s.Thread(ctx, thread)
+	if err != nil {
+		return err
+	}
+	st := perm.Fold(thread, tl.Entries())
+	for p := range st.Stewards {
+		fmt.Printf("steward     %s\n", p)
+	}
+	for _, e := range tl.Entries() {
+		if e.Kind != protolog.KindGrant {
+			continue
+		}
+		var body struct {
+			Principal string   `json:"principal"`
+			Scopes    []string `json:"scopes"`
+		}
+		if json.Unmarshal(e.Body, &body) != nil {
+			continue
+		}
+		eff := st.EffectiveScopes(body.Principal, time.Now())
+		if len(eff) == 0 {
+			continue // revoked, denied, or expired
+		}
+		var have []string
+		for sc := range eff {
+			have = append(have, string(sc))
+		}
+		fmt.Printf("granted     %s  %s\n", body.Principal, strings.Join(have, ","))
+	}
+	return nil
 }
 
 func keyPath(dataDir string) string { return filepath.Join(dataDir, "person.key") }

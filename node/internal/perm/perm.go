@@ -1,0 +1,250 @@
+// Package perm computes effective permissions by folding a thread's control
+// lane in the protocol's total order. The fold is deterministic on every
+// replica and fails closed: deny by default, deny/revoke beats grant, and
+// only person-signed entries by stewards change anything.
+package perm
+
+import (
+	"encoding/json"
+	"time"
+
+	protolog "github.com/lamdis-ai/lamdis-protocol/node/internal/log"
+)
+
+// Scope is one of the four fixed v1 scopes.
+type Scope string
+
+const (
+	ScopeContribute Scope = "contribute"
+	ScopeRead       Scope = "read"
+	ScopeSummary    Scope = "summary"
+	ScopeSearch     Scope = "search"
+)
+
+func ValidScope(s Scope) bool {
+	switch s {
+	case ScopeContribute, ScopeRead, ScopeSummary, ScopeSearch:
+		return true
+	}
+	return false
+}
+
+// ScopeSet is a set of scopes held by a principal.
+type ScopeSet map[Scope]bool
+
+func (ss ScopeSet) Has(s Scope) bool { return ss[s] }
+
+// Lanes returns the lanes a holder of this scope set may replicate/read.
+// Control is visible to every member at any scope (replicas must be able to
+// verify grants). Search alone replicates nothing beyond control.
+func (ss ScopeSet) Lanes() []protolog.Lane {
+	if len(ss) == 0 {
+		return nil
+	}
+	lanes := []protolog.Lane{protolog.LaneControl}
+	if ss.Has(ScopeRead) {
+		return append(lanes, protolog.LaneSummary, protolog.LaneContent)
+	}
+	if ss.Has(ScopeSummary) {
+		return append(lanes, protolog.LaneSummary)
+	}
+	return lanes
+}
+
+// grantBody is the body schema of core.grant / core.deny / core.revoke.
+// Grant: {principal, scopes, ttl_seconds?}. Deny/Revoke: {principal}.
+type grantBody struct {
+	Principal  string   `json:"principal"`
+	Scopes     []string `json:"scopes,omitempty"`
+	TTLSeconds int64    `json:"ttl_seconds,omitempty"`
+	Request    string   `json:"request,omitempty"` // entry id of core.access_request
+}
+
+type membershipBody struct {
+	Member string `json:"member"`
+	Role   string `json:"role"` // "steward" | "member" | "removed"
+}
+
+type delegationBody struct {
+	Agent      string `json:"agent"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
+	Revoked    bool   `json:"revoked,omitempty"`
+}
+
+// State is the folded permission state of one thread.
+type State struct {
+	Thread   string
+	Stewards map[string]bool
+	// grants maps principal → granted scopes (already net of deny/revoke).
+	grants map[string]ScopeSet
+	// expiry maps principal → grant expiry time (zero = no expiry).
+	expiry map[string]time.Time
+	// delegations maps agent principal → person principal.
+	delegations map[string]string
+	// deniedAt maps principal → lamport of the latest deny/revoke, so a
+	// concurrent grant (same lamport, later in tiebreak order) cannot win:
+	// deny beats grant under concurrency.
+	deniedAt map[string]uint64
+}
+
+// Fold computes permission state from a thread's entries. Pass entries in
+// any superset of the control lane; non-control entries are ignored. The
+// entries slice must already be in total order (ThreadLog.Entries is).
+func Fold(threadID string, entries []*protolog.Entry) *State {
+	st := &State{
+		Thread:      threadID,
+		Stewards:    map[string]bool{},
+		grants:      map[string]ScopeSet{},
+		expiry:      map[string]time.Time{},
+		delegations: map[string]string{},
+		deniedAt:    map[string]uint64{},
+	}
+	for _, e := range entries {
+		if e.Lane != protolog.LaneControl || e.Thread != threadID {
+			continue
+		}
+		st.apply(e)
+	}
+	return st
+}
+
+// personSigned reports whether e is signed directly by a person: not on
+// behalf of anyone, and not by a key that has been delegated as an agent.
+// This is the protocol's "only humans grant" rule.
+func (st *State) personSigned(e *protolog.Entry) bool {
+	if e.OnBehalfOf != "" {
+		return false
+	}
+	_, isAgent := st.delegations[e.Author]
+	return !isAgent
+}
+
+func (st *State) apply(e *protolog.Entry) {
+	switch e.Kind {
+	case protolog.KindThread:
+		var body struct {
+			Stewards []string `json:"stewards"`
+		}
+		if json.Unmarshal(e.Body, &body) == nil {
+			for _, s := range body.Stewards {
+				st.Stewards[s] = true
+			}
+		}
+		if len(st.Stewards) == 0 {
+			st.Stewards[e.Author] = true // creator is always a steward
+		}
+
+	case protolog.KindMembership:
+		if !st.Stewards[e.Author] || !st.personSigned(e) {
+			return
+		}
+		var body membershipBody
+		if json.Unmarshal(e.Body, &body) != nil || body.Member == "" {
+			return
+		}
+		switch body.Role {
+		case "steward":
+			st.Stewards[body.Member] = true
+		case "removed":
+			// A steward cannot remove the last steward (fail closed).
+			if st.Stewards[body.Member] && len(st.Stewards) == 1 {
+				return
+			}
+			delete(st.Stewards, body.Member)
+			delete(st.grants, body.Member)
+			delete(st.expiry, body.Member)
+		}
+
+	case protolog.KindDelegation:
+		// A person binds (or revokes) an agent key to themselves. Only the
+		// person signs their own delegations.
+		if e.OnBehalfOf != "" {
+			return
+		}
+		var body delegationBody
+		if json.Unmarshal(e.Body, &body) != nil || body.Agent == "" {
+			return
+		}
+		if body.Revoked {
+			if st.delegations[body.Agent] == e.Author {
+				delete(st.delegations, body.Agent)
+			}
+			return
+		}
+		st.delegations[body.Agent] = e.Author
+
+	case protolog.KindGrant:
+		if !st.Stewards[e.Author] || !st.personSigned(e) {
+			return
+		}
+		var body grantBody
+		if json.Unmarshal(e.Body, &body) != nil || body.Principal == "" {
+			return
+		}
+		if e.Lamport <= st.deniedAt[body.Principal] {
+			return // deny beats grant under concurrency
+		}
+		ss := ScopeSet{}
+		for _, s := range body.Scopes {
+			if ValidScope(Scope(s)) {
+				ss[Scope(s)] = true
+			}
+		}
+		if len(ss) == 0 {
+			return
+		}
+		st.grants[body.Principal] = ss
+		if body.TTLSeconds > 0 {
+			if ts, err := time.Parse(time.RFC3339, e.TS); err == nil {
+				st.expiry[body.Principal] = ts.Add(time.Duration(body.TTLSeconds) * time.Second)
+			}
+		} else {
+			delete(st.expiry, body.Principal)
+		}
+
+	case protolog.KindDeny, protolog.KindRevoke:
+		if !st.Stewards[e.Author] || !st.personSigned(e) {
+			return
+		}
+		var body grantBody
+		if json.Unmarshal(e.Body, &body) != nil || body.Principal == "" {
+			return
+		}
+		delete(st.grants, body.Principal)
+		delete(st.expiry, body.Principal)
+		if e.Lamport > st.deniedAt[body.Principal] {
+			st.deniedAt[body.Principal] = e.Lamport
+		}
+	}
+}
+
+// EffectiveScopes returns the scopes principal p holds at time now.
+// Stewards implicitly hold every scope. An agent key holds the scopes of
+// the person it is delegated to (severed instantly when the delegation is
+// revoked, per the fold).
+func (st *State) EffectiveScopes(p string, now time.Time) ScopeSet {
+	if person, ok := st.delegations[p]; ok {
+		p = person
+	}
+	if st.Stewards[p] {
+		return ScopeSet{ScopeContribute: true, ScopeRead: true, ScopeSummary: true, ScopeSearch: true}
+	}
+	ss, ok := st.grants[p]
+	if !ok {
+		return ScopeSet{}
+	}
+	if exp, has := st.expiry[p]; has && now.After(exp) {
+		return ScopeSet{}
+	}
+	out := ScopeSet{}
+	for s := range ss {
+		out[s] = true
+	}
+	return out
+}
+
+// Lanes is the one call sync and read paths use: which lanes may principal
+// p replicate from this thread right now. Empty means none (deny).
+func (st *State) Lanes(p string, now time.Time) []protolog.Lane {
+	return st.EffectiveScopes(p, now).Lanes()
+}

@@ -19,15 +19,22 @@ import (
 
 const rrfK = 60 // standard reciprocal-rank-fusion constant
 
-// SQLite is the embedded default driver: one file, FTS5 + sqlite-vec, no cgo
-// (WASM build). A node process is the sole writer of its database, so thread
-// logs are cached in memory and hydrated lazily.
+// SQLite is the embedded default driver: one file, FTS5, no cgo (WASM
+// build). Thread logs are cached in memory but never trusted blindly: a
+// serve daemon and CLI commands may write the same database from different
+// processes, so every cache read revalidates against the thread's max rowid
+// and rehydrates when another writer has appended.
 type SQLite struct {
 	db *sql.DB
 
 	mu   sync.Mutex
-	logs map[string]*protolog.ThreadLog
+	logs map[string]*cachedLog
 	dim  int // vector dimension; 0 until first vector arrives
+}
+
+type cachedLog struct {
+	log    *protolog.ThreadLog
+	maxRid int64
 }
 
 func OpenSQLite(path string) (*SQLite, error) {
@@ -37,7 +44,7 @@ func OpenSQLite(path string) (*SQLite, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &SQLite{db: db, logs: map[string]*protolog.ThreadLog{}}
+	s := &SQLite{db: db, logs: map[string]*cachedLog{}}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
@@ -79,11 +86,18 @@ CREATE TABLE IF NOT EXISTS vectors (rid INTEGER PRIMARY KEY REFERENCES entries(r
 
 func (s *SQLite) Close() error { return s.db.Close() }
 
-// threadLog hydrates (or returns cached) the in-memory log for a thread. The
-// log package owns every append invariant; the store never re-implements them.
+// threadLog returns the in-memory log for a thread, rehydrating from the
+// database whenever another process (or connection) has appended since the
+// cache was built. The log package owns every append invariant; the store
+// never re-implements them.
 func (s *SQLite) threadLog(ctx context.Context, threadID string) (*protolog.ThreadLog, error) {
-	if l, ok := s.logs[threadID]; ok {
-		return l, nil
+	var dbMax sql.NullInt64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT max(rid) FROM entries WHERE thread = ?`, threadID).Scan(&dbMax); err != nil {
+		return nil, err
+	}
+	if c, ok := s.logs[threadID]; ok && c.maxRid == dbMax.Int64 {
+		return c.log, nil
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT raw FROM entries WHERE thread = ? ORDER BY author, lane, seq`, threadID)
@@ -108,7 +122,7 @@ func (s *SQLite) threadLog(ctx context.Context, threadID string) (*protolog.Thre
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	s.logs[threadID] = l
+	s.logs[threadID] = &cachedLog{log: l, maxRid: dbMax.Int64}
 	return l, nil
 }
 
@@ -155,12 +169,12 @@ func (s *SQLite) AppendEntries(ctx context.Context, entries []*protolog.Entry) e
 			tx.Rollback()
 			return err
 		}
+		rid, err := res.LastInsertId()
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
 		if txt := indexableText(e); txt != "" {
-			rid, err := res.LastInsertId()
-			if err != nil {
-				tx.Rollback()
-				return err
-			}
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO entries_fts (rowid, text) VALUES (?, ?)`, rid, txt); err != nil {
 				tx.Rollback()
@@ -169,6 +183,9 @@ func (s *SQLite) AppendEntries(ctx context.Context, entries []*protolog.Entry) e
 		}
 		if err := tx.Commit(); err != nil {
 			return err
+		}
+		if c, ok := s.logs[e.Thread]; ok && rid > c.maxRid {
+			c.maxRid = rid // keep the cache current for our own writes
 		}
 	}
 	return nil

@@ -1,0 +1,199 @@
+// Package api is the node's HTTP surface. v1 carries the sync protocol
+// (peer-to-peer and client↔hub use the same endpoints). Requests are
+// authenticated by Ed25519 request signatures: the caller IS a principal;
+// there is no ambient authority anywhere.
+package api
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+
+	protolog "github.com/lamdis-ai/lamdis-protocol/node/internal/log"
+	syncp "github.com/lamdis-ai/lamdis-protocol/node/internal/sync"
+)
+
+const (
+	hdrPrincipal = "X-Lamdis-Principal"
+	hdrTimestamp = "X-Lamdis-Timestamp"
+	hdrSignature = "X-Lamdis-Signature"
+	maxSkew      = 5 * time.Minute
+	maxBody      = 32 << 20 // 32 MiB per request
+)
+
+// signingInput binds method, path, time, and body so a signature cannot be
+// replayed against another endpoint or payload.
+func signingInput(method, path, timestamp string, body []byte) []byte {
+	sum := sha256.Sum256(body)
+	return []byte(method + "\n" + path + "\n" + timestamp + "\n" + hex.EncodeToString(sum[:]))
+}
+
+// Sign adds auth headers to an outgoing request whose body is body.
+func Sign(req *http.Request, priv ed25519.PrivateKey, body []byte) error {
+	pid, err := protolog.PrincipalID(priv.Public().(ed25519.PublicKey))
+	if err != nil {
+		return err
+	}
+	ts := time.Now().UTC().Format(time.RFC3339)
+	sig := ed25519.Sign(priv, signingInput(req.Method, req.URL.Path, ts, body))
+	req.Header.Set(hdrPrincipal, pid)
+	req.Header.Set(hdrTimestamp, ts)
+	req.Header.Set(hdrSignature, hex.EncodeToString(sig))
+	return nil
+}
+
+// authenticate verifies the request signature and returns the principal id.
+func authenticate(r *http.Request, body []byte, now time.Time) (string, error) {
+	pid := r.Header.Get(hdrPrincipal)
+	ts := r.Header.Get(hdrTimestamp)
+	sigHex := r.Header.Get(hdrSignature)
+	if pid == "" || ts == "" || sigHex == "" {
+		return "", fmt.Errorf("missing auth headers")
+	}
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return "", fmt.Errorf("bad timestamp")
+	}
+	if d := now.Sub(t); d > maxSkew || d < -maxSkew {
+		return "", fmt.Errorf("timestamp outside allowed skew")
+	}
+	pub, err := protolog.PublicKey(pid)
+	if err != nil {
+		return "", err
+	}
+	sig, err := hex.DecodeString(sigHex)
+	if err != nil {
+		return "", fmt.Errorf("bad signature encoding")
+	}
+	if !ed25519.Verify(pub, signingInput(r.Method, r.URL.Path, ts, body), sig) {
+		return "", fmt.Errorf("signature verification failed")
+	}
+	return pid, nil
+}
+
+// Server exposes the sync protocol over HTTP.
+type Server struct {
+	Sync *syncp.Server
+	Now  func() time.Time
+}
+
+func (s *Server) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/sync/list", s.withAuth(s.handleList))
+	mux.HandleFunc("POST /v1/sync/pull", s.withAuth(s.handlePull))
+	return mux
+}
+
+func (s *Server) withAuth(next func(w http.ResponseWriter, r *http.Request, principal string, body []byte)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+		if err != nil {
+			http.Error(w, "read body", http.StatusBadRequest)
+			return
+		}
+		principal, err := authenticate(r, body, s.now())
+		if err != nil {
+			// One generic message: no oracle about which check failed.
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r, principal, body)
+	}
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func (s *Server) handleList(w http.ResponseWriter, r *http.Request, principal string, _ []byte) {
+	ids, err := s.Sync.List(r.Context(), principal)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"threads": ids})
+}
+
+func (s *Server) handlePull(w http.ResponseWriter, r *http.Request, principal string, body []byte) {
+	var req syncp.PullRequest
+	if err := json.Unmarshal(body, &req); err != nil || req.Thread == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	resp, err := s.Sync.Pull(r.Context(), principal, req)
+	if err != nil {
+		// Not-found and not-permitted are deliberately the same status.
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, resp)
+}
+
+// HTTPTransport implements sync.Transport against a remote node.
+type HTTPTransport struct {
+	BaseURL string
+	Key     ed25519.PrivateKey
+	Client  *http.Client
+}
+
+func NewHTTPTransport(baseURL string, key ed25519.PrivateKey) *HTTPTransport {
+	return &HTTPTransport{BaseURL: baseURL, Key: key, Client: &http.Client{Timeout: 60 * time.Second}}
+}
+
+func (t *HTTPTransport) post(ctx context.Context, path string, payload, out any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.BaseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if err := Sign(req, t.Key, body); err != nil {
+		return err
+	}
+	resp, err := t.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("%s: %s: %s", path, resp.Status, bytes.TrimSpace(msg))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func (t *HTTPTransport) List(ctx context.Context) ([]string, error) {
+	var out struct {
+		Threads []string `json:"threads"`
+	}
+	if err := t.post(ctx, "/v1/sync/list", map[string]any{}, &out); err != nil {
+		return nil, err
+	}
+	return out.Threads, nil
+}
+
+func (t *HTTPTransport) Pull(ctx context.Context, req syncp.PullRequest) (*syncp.PullResponse, error) {
+	var out syncp.PullResponse
+	if err := t.post(ctx, "/v1/sync/pull", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
