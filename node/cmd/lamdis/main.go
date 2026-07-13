@@ -19,10 +19,13 @@ import (
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/api"
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/embed"
 	protolog "github.com/lamdis-ai/lamdis-protocol/node/internal/log"
+	nodemcp "github.com/lamdis-ai/lamdis-protocol/node/internal/mcp"
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/perm"
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/store"
 	syncp "github.com/lamdis-ai/lamdis-protocol/node/internal/sync"
 )
+
+const version = "0.1.0-dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -44,6 +47,7 @@ commands:
   read <thread>               print a thread's entries (all lanes)
   search <query>              hybrid search across all local threads
 
+  mcp                         serve MCP over stdio (add to your agent's .mcp.json)
   serve [-addr :8420]         serve sync to peers (run this; give peers your URL)
   peer add <name> <url>       remember a peer node
   peers                       list peers
@@ -120,6 +124,18 @@ func run(args []string) error {
 			return usage()
 		}
 		return cmdSearch(ctx, s, strings.Join(rest, " "))
+	case "mcp":
+		priv, pid, err := loadKey(*dataDir)
+		if err != nil {
+			return err
+		}
+		peers, err := loadPeers(*dataDir)
+		if err != nil {
+			return err
+		}
+		return nodemcp.RunStdio(ctx, &nodemcp.Node{
+			Store: s, Key: priv, Self: pid, Peers: peers, Embedder: embedderFromEnv(),
+		}, version)
 	case "serve":
 		return cmdServe(*dataDir, s, rest)
 	case "peer":

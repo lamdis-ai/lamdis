@@ -24,7 +24,20 @@ Early — M0 (core node) in progress:
 - [x] P2P sync: signed HTTP between paired nodes, permission-filtered serving — a summary-scoped peer never receives a content byte (`node/internal/sync`, `node/internal/api`)
 - [x] CLI: `serve`, `peer add`, `sync [-watch 30s]`, `grant`, `revoke`, `access`
 - [x] Bidirectional sync: push verb with contribute enforcement on both ends — peers can only upload what their grant window allows, and clients refuse unauthorized data relayed by a compromised peer
-- [ ] MCP server · access-request/approval inbox UI · hub mode & federation · Postgres/pgvector driver · libp2p transport
+- [x] MCP server (`lamdis mcp`, stdio): whoami, list/read/create threads, post_entry (content or summary lane), search_context, sync_peers. Deliberately no grant/revoke tools — approvals are human-signed acts, never tool calls
+- [ ] Access-request flow + approval inbox UI (Lamdis Portal) · hub mode & federation · Postgres/pgvector driver · libp2p transport
+
+## Connect your agent (MCP)
+
+```jsonc
+// .mcp.json (Claude Code, or any MCP client)
+{ "mcpServers": { "lamdis": { "command": "lamdis", "args": ["mcp"] } } }
+```
+
+Your agent can then post working context to threads, publish shareable
+summaries (`post_entry` with `lane: summary` — that's what summary-scoped
+peers see), search everything you hold, and `sync_peers` before answering
+freshness-sensitive questions.
 
 ## Two-person quickstart (you + a coworker)
 
