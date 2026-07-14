@@ -395,13 +395,33 @@ func cmdServe(dataDir string, s store.Store, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	_, pid, err := loadKey(dataDir)
+	priv, pid, err := loadKey(dataDir)
 	if err != nil {
 		return err
 	}
-	srv := &api.Server{Sync: &syncp.Server{Store: s}, Principal: pid}
-	fmt.Printf("lamdis node serving on %s\nprincipal: %s\ngive peers this URL; grants decide what they can pull\n", *addr, pid)
-	return http.ListenAndServe(*addr, srv.Handler())
+	tokenPath := filepath.Join(dataDir, "portal.token")
+	tokenRaw, err := os.ReadFile(tokenPath)
+	if err != nil {
+		tok, err := api.NewPortalToken()
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(tokenPath, []byte(tok), 0o600); err != nil {
+			return err
+		}
+		tokenRaw = []byte(tok)
+	}
+	token := strings.TrimSpace(string(tokenRaw))
+	mux := (&api.Server{Sync: &syncp.Server{Store: s}, Principal: pid}).Handler()
+	portal := &api.Portal{Store: s, Key: priv, Self: pid, Token: token,
+		Names: func(principal string) string { return peerName(dataDir, principal) }}
+	portal.Register(mux)
+	host := *addr
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+	fmt.Printf("lamdis node serving on %s\nprincipal: %s\nportal:    http://%s/portal?token=%s\ngive peers your URL; grants decide what they can pull\n", *addr, pid, host, token)
+	return http.ListenAndServe(*addr, mux)
 }
 
 func cmdSync(ctx context.Context, dataDir string, s store.Store, args []string) error {

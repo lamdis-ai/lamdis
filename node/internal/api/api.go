@@ -94,7 +94,7 @@ func (s *Server) now() time.Time {
 	return time.Now()
 }
 
-func (s *Server) Handler() http.Handler {
+func (s *Server) Handler() *http.ServeMux {
 	mux := http.NewServeMux()
 	// Node identity is public by design: it's how two people pair. It reveals
 	// nothing about threads or content.
