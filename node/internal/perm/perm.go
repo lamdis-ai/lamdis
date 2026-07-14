@@ -71,10 +71,26 @@ type delegationBody struct {
 	Revoked    bool   `json:"revoked,omitempty"`
 }
 
+// AccessRequest is a pending, unanswered core.access_request.
+type AccessRequest struct {
+	EntryID   string
+	Principal string
+	Scopes    []string
+	Reason    string
+	TS        string
+	lamport   uint64
+}
+
 // State is the folded permission state of one thread.
 type State struct {
 	Thread   string
 	Stewards map[string]bool
+	// Discoverable threads advertise their existence (id + title only) to
+	// any authenticated peer, so access can be requested. Default: hidden.
+	Discoverable bool
+	Title        string
+	// requests tracks the latest access request per principal.
+	requests map[string]*AccessRequest
 	// grants maps principal → granted scopes (already net of deny/revoke).
 	grants map[string]ScopeSet
 	// expiry maps principal → grant expiry time (zero = no expiry).
@@ -98,6 +114,7 @@ func Fold(threadID string, entries []*protolog.Entry) *State {
 	st := &State{
 		Thread:      threadID,
 		Stewards:    map[string]bool{},
+		requests:    map[string]*AccessRequest{},
 		grants:      map[string]ScopeSet{},
 		expiry:      map[string]time.Time{},
 		delegations: map[string]string{},
@@ -128,12 +145,16 @@ func (st *State) apply(e *protolog.Entry) {
 	switch e.Kind {
 	case protolog.KindThread:
 		var body struct {
-			Stewards []string `json:"stewards"`
+			Stewards     []string `json:"stewards"`
+			Title        string   `json:"title"`
+			Discoverable bool     `json:"discoverable"`
 		}
 		if json.Unmarshal(e.Body, &body) == nil {
 			for _, s := range body.Stewards {
 				st.Stewards[s] = true
 			}
+			st.Title = body.Title
+			st.Discoverable = body.Discoverable
 		}
 		if len(st.Stewards) == 0 {
 			st.Stewards[e.Author] = true // creator is always a steward
@@ -178,6 +199,25 @@ func (st *State) apply(e *protolog.Entry) {
 		}
 		st.delegations[body.Agent] = e.Author
 
+	case protolog.KindAccessRequest:
+		// Anyone may file a request for themselves (or their person, when a
+		// delegated agent asks on their behalf).
+		var body struct {
+			Scopes []string `json:"scopes"`
+			Reason string   `json:"reason"`
+		}
+		if json.Unmarshal(e.Body, &body) != nil {
+			return
+		}
+		principal := e.Author
+		if e.OnBehalfOf != "" {
+			principal = e.OnBehalfOf
+		}
+		st.requests[principal] = &AccessRequest{
+			EntryID: e.ID, Principal: principal, Scopes: body.Scopes,
+			Reason: body.Reason, TS: e.TS, lamport: e.Lamport,
+		}
+
 	case protolog.KindGrant:
 		if !st.Stewards[e.Author] || !st.personSigned(e) {
 			return
@@ -197,6 +237,9 @@ func (st *State) apply(e *protolog.Entry) {
 		}
 		if len(ss) == 0 {
 			return
+		}
+		if r, ok := st.requests[body.Principal]; ok && r.lamport <= e.Lamport {
+			delete(st.requests, body.Principal)
 		}
 		st.grants[body.Principal] = ss
 		if ss.Has(ScopeContribute) {
@@ -222,10 +265,27 @@ func (st *State) apply(e *protolog.Entry) {
 		}
 		delete(st.grants, body.Principal)
 		delete(st.expiry, body.Principal)
+		if r, ok := st.requests[body.Principal]; ok && r.lamport <= e.Lamport {
+			delete(st.requests, body.Principal)
+		}
 		if e.Lamport > st.deniedAt[body.Principal] {
 			st.deniedAt[body.Principal] = e.Lamport
 		}
 	}
+}
+
+// PendingRequests returns unanswered access requests, oldest first.
+func (st *State) PendingRequests() []*AccessRequest {
+	var out []*AccessRequest
+	for _, r := range st.requests {
+		out = append(out, r)
+	}
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].lamport < out[j-1].lamport; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
 }
 
 // EffectiveScopes returns the scopes principal p holds at time now.

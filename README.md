@@ -34,7 +34,8 @@ Early — M0 (core node) in progress:
 - [x] CLI: `serve`, `peer add`, `sync [-watch 30s]`, `grant`, `revoke`, `access`
 - [x] Bidirectional sync: push verb with contribute enforcement on both ends — peers can only upload what their grant window allows, and clients refuse unauthorized data relayed by a compromised peer
 - [x] MCP server (`lamdis mcp`, stdio): whoami, list/read/create threads, post_entry (content or summary lane), search_context, sync_peers. Deliberately no grant/revoke tools — approvals are human-signed acts, never tool calls
-- [ ] Access-request flow + approval inbox UI (Lamdis Portal) · hub mode & federation · Postgres/pgvector driver · libp2p transport
+- [x] Access requests: `thread new -discoverable` advertises title-only existence; peers `discover` and `request <peer> <thread> <scopes> [reason]`; you answer with `requests` → `approve`/`deny`. Agents can ask over MCP (`request_access`) but never grant
+- [ ] Approval inbox UI (Lamdis Portal) · hub mode & federation · Postgres/pgvector driver · libp2p transport
 
 ## Under the hood
 

@@ -40,7 +40,8 @@ func usage() error {
 commands:
   init                        create a person keypair and empty store
   whoami                      print this node's person principal id
-  thread new <title>          create a thread; prints its id
+  thread new [-discoverable] <title>   create a thread; prints its id
+                              (-discoverable lets paired peers see it exists and ask)
   threads                     list thread ids and titles
   post <thread> <text>        append a core.message to a thread
   post -kind K -lane L ...    append any kind/lane (body from -text or -json)
@@ -52,6 +53,12 @@ commands:
   peer add <name> <url>       pair with a person's node (exchanges identities)
   peers                       list who you're paired with
   sync [peer] [-watch 30s]    sync permitted threads with peers (default: all)
+
+  discover <peer>             see which of a peer's threads you could request
+  request <peer> <thread> <scopes> [reason...]   ask for access
+  requests                    pending requests on YOUR threads
+  approve <thread> <who> [scopes]                answer a request (default: as asked)
+  deny <thread> <who>                            decline a request
 
   grant <thread> <who> <scopes>   share a thread: thread by title or id,
        [-ttl 168h]                who by peer name (e.g. jane) or principal id.
@@ -111,7 +118,12 @@ func run(args []string) error {
 		if len(rest) < 2 || rest[0] != "new" {
 			return usage()
 		}
-		return cmdThreadNew(ctx, *dataDir, s, strings.Join(rest[1:], " "))
+		disc := false
+		args := rest[1:]
+		if args[0] == "-discoverable" {
+			disc, args = true, args[1:]
+		}
+		return cmdThreadNew(ctx, *dataDir, s, strings.Join(args, " "), disc)
 	case "threads":
 		return cmdThreads(ctx, s)
 	case "post":
@@ -157,6 +169,37 @@ func run(args []string) error {
 		return cmdPeers(*dataDir)
 	case "sync":
 		return cmdSync(ctx, *dataDir, s, rest)
+	case "discover":
+		if len(rest) != 1 {
+			return usage()
+		}
+		return cmdDiscover(ctx, *dataDir, rest[0])
+	case "request":
+		if len(rest) < 3 {
+			return usage()
+		}
+		return cmdRequest(ctx, *dataDir, rest[0], rest[1], rest[2], strings.Join(rest[3:], " "))
+	case "requests":
+		return cmdRequests(ctx, *dataDir, s)
+	case "approve":
+		if len(rest) < 2 || len(rest) > 3 {
+			return usage()
+		}
+		return cmdApprove(ctx, *dataDir, s, rest)
+	case "deny":
+		if len(rest) != 2 {
+			return usage()
+		}
+		thread, err := resolveThread(ctx, s, rest[0])
+		if err != nil {
+			return err
+		}
+		who, err := resolveWho(*dataDir, rest[1])
+		if err != nil {
+			return err
+		}
+		return cmdGrantWrite(ctx, *dataDir, s, protolog.KindDeny, thread,
+			map[string]any{"principal": who})
 	case "grant":
 		return cmdGrant(ctx, *dataDir, s, rest)
 	case "revoke":
@@ -596,12 +639,12 @@ func drainEmbeds(ctx context.Context, s store.Store) {
 	}
 }
 
-func cmdThreadNew(ctx context.Context, dataDir string, s store.Store, title string) error {
+func cmdThreadNew(ctx context.Context, dataDir string, s store.Store, title string, discoverable bool) error {
 	priv, _, err := loadKey(dataDir)
 	if err != nil {
 		return err
 	}
-	l, genesis, err := protolog.NewThread(priv, title, nil)
+	l, genesis, err := protolog.NewThreadWith(priv, title, discoverable, nil)
 	if err != nil {
 		return err
 	}
@@ -733,5 +776,162 @@ func cmdSearch(ctx context.Context, s store.Store, query string) error {
 	for _, h := range hits {
 		fmt.Printf("%.4f  %s  [%s/%s] %s\n", h.Rank, h.Thread, h.Lane, h.Kind, h.Snippet)
 	}
+	return nil
+}
+
+func peerTransport(dataDir, name string) (*api.HTTPTransport, error) {
+	priv, _, err := loadKey(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	peers, err := loadPeers(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	p, ok := peers[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown peer %q (add with `lamdis peer add`)", name)
+	}
+	return api.NewHTTPTransport(p.URL, priv), nil
+}
+
+func cmdDiscover(ctx context.Context, dataDir, peer string) error {
+	t, err := peerTransport(dataDir, peer)
+	if err != nil {
+		return err
+	}
+	threads, err := t.Discover(ctx)
+	if err != nil {
+		return err
+	}
+	if len(threads) == 0 {
+		fmt.Println("nothing discoverable (they can mark threads with `thread new -discoverable`)")
+		return nil
+	}
+	for _, th := range threads {
+		fmt.Printf("%s  %s\n", th.ID, th.Title)
+	}
+	return nil
+}
+
+func cmdRequest(ctx context.Context, dataDir, peer, threadRef, scopesArg, reason string) error {
+	t, err := peerTransport(dataDir, peer)
+	if err != nil {
+		return err
+	}
+	var scopes []string
+	for _, sc := range strings.Split(scopesArg, ",") {
+		sc = strings.TrimSpace(sc)
+		if !perm.ValidScope(perm.Scope(sc)) {
+			return fmt.Errorf("invalid scope %q (valid: contribute, read, summary, search)", sc)
+		}
+		scopes = append(scopes, sc)
+	}
+	threads, err := t.Discover(ctx)
+	if err != nil {
+		return err
+	}
+	var target string
+	low := strings.ToLower(threadRef)
+	for _, th := range threads {
+		if th.ID == threadRef || strings.Contains(strings.ToLower(th.Title), low) {
+			if target != "" {
+				return fmt.Errorf("%q matches several of %s's threads — use the id from `lamdis discover %s`", threadRef, peer, peer)
+			}
+			target = th.ID
+		}
+	}
+	if target == "" {
+		return fmt.Errorf("no discoverable thread of %s matches %q (see `lamdis discover %s`)", peer, threadRef, peer)
+	}
+	priv, _, err := loadKey(dataDir)
+	if err != nil {
+		return err
+	}
+	e, err := syncp.BuildAccessRequest(priv, target, scopes, reason, nil)
+	if err != nil {
+		return err
+	}
+	if err := t.RequestAccess(ctx, e); err != nil {
+		return err
+	}
+	fmt.Printf("✓ asked %s for %s on %s — they'll see it in `lamdis requests`\n", peer, scopesArg, threadRef)
+	return nil
+}
+
+func cmdRequests(ctx context.Context, dataDir string, s store.Store) error {
+	ids, err := s.Threads(ctx)
+	if err != nil {
+		return err
+	}
+	any := false
+	for _, id := range ids {
+		tl, err := s.Thread(ctx, id)
+		if err != nil {
+			continue
+		}
+		st := perm.Fold(id, tl.Entries())
+		for _, r := range st.PendingRequests() {
+			any = true
+			who := r.Principal
+			if name := peerName(dataDir, r.Principal); name != "" {
+				who = name
+			}
+			reason := r.Reason
+			if reason != "" {
+				reason = " — \"" + reason + "\""
+			}
+			fmt.Printf("%s wants %s on %q%s\n  approve: lamdis approve %q %s\n",
+				who, strings.Join(r.Scopes, ","), st.Title, reason, st.Title, who)
+		}
+	}
+	if !any {
+		fmt.Println("no pending requests")
+	}
+	return nil
+}
+
+func cmdApprove(ctx context.Context, dataDir string, s store.Store, rest []string) error {
+	thread, err := resolveThread(ctx, s, rest[0])
+	if err != nil {
+		return err
+	}
+	who, err := resolveWho(dataDir, rest[1])
+	if err != nil {
+		return err
+	}
+	tl, err := s.Thread(ctx, thread)
+	if err != nil {
+		return err
+	}
+	st := perm.Fold(thread, tl.Entries())
+	var scopes []string
+	var requestID string
+	for _, r := range st.PendingRequests() {
+		if r.Principal == who {
+			scopes, requestID = r.Scopes, r.EntryID
+		}
+	}
+	if len(rest) == 3 { // explicit scopes override the asked-for ones
+		scopes = nil
+		for _, sc := range strings.Split(rest[2], ",") {
+			sc = strings.TrimSpace(sc)
+			if !perm.ValidScope(perm.Scope(sc)) {
+				return fmt.Errorf("invalid scope %q", sc)
+			}
+			scopes = append(scopes, sc)
+		}
+	}
+	if len(scopes) == 0 {
+		return fmt.Errorf("no pending request from them on this thread — use `lamdis grant` to share unprompted")
+	}
+	body := map[string]any{"principal": who, "scopes": scopes}
+	if requestID != "" {
+		body["request"] = requestID
+	}
+	if err := cmdGrantWrite(ctx, dataDir, s, protolog.KindGrant, thread, body); err != nil {
+		return err
+	}
+	fmt.Printf("✓ approved — they receive it on their next sync\n")
 	return nil
 }

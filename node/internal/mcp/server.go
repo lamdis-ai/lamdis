@@ -16,6 +16,7 @@ import (
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/api"
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/embed"
 	protolog "github.com/lamdis-ai/lamdis-protocol/node/internal/log"
+	"github.com/lamdis-ai/lamdis-protocol/node/internal/perm"
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/store"
 	syncp "github.com/lamdis-ai/lamdis-protocol/node/internal/sync"
 )
@@ -177,6 +178,75 @@ func NewServer(n *Node, version string) *sdk.Server {
 			}
 			if b.Len() == 0 {
 				b.WriteString("no results")
+			}
+			return textResult("%s", b.String()), nil, nil
+		})
+
+	type reqArgs struct {
+		Peer   string `json:"peer" jsonschema:"peer name from whoami"`
+		Thread string `json:"thread" jsonschema:"thread title fragment or id, from the peer's discoverable threads"`
+		Scopes string `json:"scopes" jsonschema:"comma-separated: summary,search (the gist) or contribute,read,search (full)"`
+		Reason string `json:"reason" jsonschema:"one line: why you need it — the human deciding reads this"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "request_access",
+		Description: "Ask another person for access to one of their threads. A HUMAN approves or denies — this tool cannot grant anything."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a reqArgs) (*sdk.CallToolResult, any, error) {
+			url, ok := n.Peers[a.Peer]
+			if !ok {
+				return nil, nil, fmt.Errorf("unknown peer %q", a.Peer)
+			}
+			t := api.NewHTTPTransport(url, n.Key)
+			threads, err := t.Discover(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			target := ""
+			low := strings.ToLower(a.Thread)
+			for _, th := range threads {
+				if th.ID == a.Thread || strings.Contains(strings.ToLower(th.Title), low) {
+					if target != "" {
+						return nil, nil, fmt.Errorf("%q is ambiguous among their discoverable threads", a.Thread)
+					}
+					target = th.ID
+				}
+			}
+			if target == "" {
+				return nil, nil, fmt.Errorf("no discoverable thread of %s matches %q", a.Peer, a.Thread)
+			}
+			var scopes []string
+			for _, sc := range strings.Split(a.Scopes, ",") {
+				scopes = append(scopes, strings.TrimSpace(sc))
+			}
+			e, err := syncp.BuildAccessRequest(n.Key, target, scopes, a.Reason, nil)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := t.RequestAccess(ctx, e); err != nil {
+				return nil, nil, err
+			}
+			return textResult("requested %s on %s's thread — a human on their side decides", a.Scopes, a.Peer), nil, nil
+		})
+
+	sdk.AddTool(s, &sdk.Tool{Name: "list_access_requests",
+		Description: "Pending access requests on this node's threads. Surface them to your human — only they can approve (lamdis approve <thread> <who>)."},
+		func(ctx context.Context, req *sdk.CallToolRequest, _ empty) (*sdk.CallToolResult, any, error) {
+			ids, err := n.Store.Threads(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			var b strings.Builder
+			for _, id := range ids {
+				tl, err := n.Store.Thread(ctx, id)
+				if err != nil {
+					continue
+				}
+				st := perm.Fold(id, tl.Entries())
+				for _, r := range st.PendingRequests() {
+					fmt.Fprintf(&b, "%s wants %s on %q — %s\n", short(r.Principal), strings.Join(r.Scopes, ","), st.Title, r.Reason)
+				}
+			}
+			if b.Len() == 0 {
+				b.WriteString("no pending requests")
 			}
 			return textResult("%s", b.String()), nil, nil
 		})

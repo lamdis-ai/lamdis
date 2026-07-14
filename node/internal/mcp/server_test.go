@@ -71,8 +71,8 @@ func TestMCPToolSurface(t *testing.T) {
 			t.Fatalf("forbidden approval tool exposed over MCP: %s", tool.Name)
 		}
 	}
-	if len(tools.Tools) != 7 {
-		t.Fatalf("tool count = %d, want 7", len(tools.Tools))
+	if len(tools.Tools) != 9 {
+		t.Fatalf("tool count = %d, want 9", len(tools.Tools))
 	}
 
 	if out := callText(t, sess, "whoami", nil); !strings.Contains(out, pid) {

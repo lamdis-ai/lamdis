@@ -203,9 +203,15 @@ func (a *Author) Append(d Draft) (*Entry, error) {
 	return e, nil
 }
 
-// NewThread creates a genesis entry (kind core.thread) and the ThreadLog it
-// anchors. The thread id is the genesis entry's id.
+// NewThread creates a private thread. See NewThreadWith for options.
 func NewThread(priv ed25519.PrivateKey, title string, now func() time.Time) (*ThreadLog, *Entry, error) {
+	return NewThreadWith(priv, title, false, now)
+}
+
+// NewThreadWith creates a genesis entry (kind core.thread) and the ThreadLog
+// it anchors. The thread id is the genesis entry's id. Discoverable threads
+// advertise id+title to authenticated peers so access can be requested.
+func NewThreadWith(priv ed25519.PrivateKey, title string, discoverable bool, now func() time.Time) (*ThreadLog, *Entry, error) {
 	pid, err := PrincipalID(priv.Public().(ed25519.PublicKey))
 	if err != nil {
 		return nil, nil, err
@@ -215,7 +221,11 @@ func NewThread(priv ed25519.PrivateKey, title string, now func() time.Time) (*Th
 	}
 	t := now().UTC()
 	id := ulid.MustNew(ulid.Timestamp(t), ulid.DefaultEntropy()).String()
-	body, err := toRawBody(map[string]any{"title": title, "stewards": []string{pid}})
+	genesis := map[string]any{"title": title, "stewards": []string{pid}}
+	if discoverable {
+		genesis["discoverable"] = true
+	}
+	body, err := toRawBody(genesis)
 	if err != nil {
 		return nil, nil, err
 	}

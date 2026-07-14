@@ -8,8 +8,12 @@ package sync
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/oklog/ulid/v2"
 
 	protolog "github.com/lamdis-ai/lamdis-protocol/node/internal/log"
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/perm"
@@ -168,6 +172,87 @@ func (s *Server) Push(ctx context.Context, principal string, req PushRequest) (*
 		return nil, err
 	}
 	return &PushResponse{Accepted: len(ordered)}, nil
+}
+
+// DiscoverableThread is what a hidden-by-default node advertises: existence
+// and title, never contents.
+type DiscoverableThread struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+// Discover lists threads that are either already visible to the principal
+// or explicitly marked discoverable.
+func (s *Server) Discover(ctx context.Context, principal string) ([]DiscoverableThread, error) {
+	ids, err := s.Store.Threads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []DiscoverableThread
+	for _, id := range ids {
+		tl, err := s.Store.Thread(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		st := perm.Fold(id, tl.Entries())
+		if st.Discoverable || len(st.Lanes(principal, s.now())) > 0 {
+			out = append(out, DiscoverableThread{ID: id, Title: st.Title})
+		}
+	}
+	return out, nil
+}
+
+// SubmitAccessRequest admits a signed core.access_request from a principal
+// with no other rights on the thread — the one control-lane write an
+// outsider may make. Everything else about the entry is validated as usual.
+func (s *Server) SubmitAccessRequest(ctx context.Context, principal string, e *protolog.Entry) error {
+	tl, err := s.Store.Thread(ctx, e.Thread)
+	if err != nil {
+		return fmt.Errorf("thread not found")
+	}
+	st := perm.Fold(e.Thread, tl.Entries())
+	if !st.Discoverable && len(st.Lanes(principal, s.now())) == 0 {
+		return fmt.Errorf("thread not found") // hidden threads give no oracle
+	}
+	if e.Kind != protolog.KindAccessRequest || e.Lane != protolog.LaneControl {
+		return fmt.Errorf("only core.access_request may be submitted")
+	}
+	if !st.ActsFor(e.Author, principal) {
+		return fmt.Errorf("author is not the authenticated principal")
+	}
+	return s.Store.AppendEntries(ctx, []*protolog.Entry{e})
+}
+
+// BuildAccessRequest constructs the signed core.access_request entry an
+// outsider submits: first entry of their own control chain in a thread they
+// don't hold. Lamport 1 is fine — answering grants always sort later.
+func BuildAccessRequest(priv ed25519.PrivateKey, threadID string, scopes []string, reason string, now func() time.Time) (*protolog.Entry, error) {
+	if now == nil {
+		now = time.Now
+	}
+	pid, err := protolog.PrincipalID(priv.Public().(ed25519.PublicKey))
+	if err != nil {
+		return nil, err
+	}
+	t := now().UTC()
+	body, _ := json.Marshal(map[string]any{"scopes": scopes, "reason": reason})
+	e := &protolog.Entry{
+		V:       protolog.EnvelopeVersion,
+		ID:      ulid.MustNew(ulid.Timestamp(t), ulid.DefaultEntropy()).String(),
+		Thread:  threadID,
+		Kind:    protolog.KindAccessRequest,
+		Lane:    protolog.LaneControl,
+		Author:  pid,
+		Seq:     1,
+		Lamport: 1,
+		Prev:    protolog.GenesisPrev,
+		TS:      t.Format(time.RFC3339),
+		Body:    body,
+	}
+	if err := e.Sign(priv); err != nil {
+		return nil, err
+	}
+	return e, nil
 }
 
 // Client syncs threads with one remote peer: pull everything permitted,

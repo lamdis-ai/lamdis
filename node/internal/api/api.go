@@ -104,7 +104,31 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/sync/list", s.withAuth(s.handleList))
 	mux.HandleFunc("POST /v1/sync/pull", s.withAuth(s.handlePull))
 	mux.HandleFunc("POST /v1/sync/push", s.withAuth(s.handlePush))
+	mux.HandleFunc("POST /v1/discover", s.withAuth(s.handleDiscover))
+	mux.HandleFunc("POST /v1/access/request", s.withAuth(s.handleAccessRequest))
 	return mux
+}
+
+func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request, principal string, _ []byte) {
+	threads, err := s.Sync.Discover(r.Context(), principal)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"threads": threads})
+}
+
+func (s *Server) handleAccessRequest(w http.ResponseWriter, r *http.Request, principal string, body []byte) {
+	var e protolog.Entry
+	if err := json.Unmarshal(body, &e); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := s.Sync.SubmitAccessRequest(r.Context(), principal, &e); err != nil {
+		http.Error(w, "rejected", http.StatusForbidden)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // FetchNodeInfo returns the principal a node at baseURL identifies as.
@@ -246,6 +270,21 @@ func (t *HTTPTransport) Pull(ctx context.Context, req syncp.PullRequest) (*syncp
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (t *HTTPTransport) Discover(ctx context.Context) ([]syncp.DiscoverableThread, error) {
+	var out struct {
+		Threads []syncp.DiscoverableThread `json:"threads"`
+	}
+	if err := t.post(ctx, "/v1/discover", map[string]any{}, &out); err != nil {
+		return nil, err
+	}
+	return out.Threads, nil
+}
+
+func (t *HTTPTransport) RequestAccess(ctx context.Context, e *protolog.Entry) error {
+	var out map[string]any
+	return t.post(ctx, "/v1/access/request", e, &out)
 }
 
 func (t *HTTPTransport) Push(ctx context.Context, req syncp.PushRequest) (*syncp.PushResponse, error) {
