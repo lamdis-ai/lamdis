@@ -9,6 +9,8 @@ Five nouns — **Principal, Thread, Entry, Grant, Node** — seven verbs — **p
 - **Enterprise:** your team's agents each hold context their humans painstakingly sync in meetings. Agents should sync it instead — but only through threads each person approves. John's agent can know *what* Jane's project thread is about (summary-only scope) without ever holding a raw entry from it.
 - **Home:** your cameras, assistants, and computers each hold context the others can't see. One permissioned store they all contribute to and query.
 
+![Two nodes, one permissioned thread — pair, grant the gist, sync, upgrade to full context](docs/demo.gif)
+
 No existing system ships human-approved, per-thread, cross-person grants (mid-2026 survey: admin RBAC, inherited document ACLs, or per-tool-call approval everywhere). This protocol makes human approval a *cryptographically verifiable* property: only `person` principals can sign grants.
 
 ## Status
