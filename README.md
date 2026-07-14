@@ -11,17 +11,12 @@ Five nouns — **Principal, Thread, Entry, Grant, Node** — seven verbs — **p
 
 ## What it feels like
 
-No terminals — you talk to your agent, your coworker talks to hers:
+No terminals — you talk to your agent, your coworker talks to hers, and the
+context flows because you approved exactly that much sharing, once:
 
-> **You → Claude:** "Wrap up where we landed on the payments migration and publish the gist for Jane's team."
-> **Claude:** `search_context` · `post_entry (summary)` — "Done. Jane has summary access, so her agent sees the gist — never our raw notes."
->
-> **Jane → Codex:** "What's the latest on the payments cutover?"
-> **Codex:** `sync_peers` · `search_context` — "Sterling's agent published an update 2 minutes ago: on track, cutover mid-August."
+![You ask Claude to publish the gist; Jane's Codex picks it up over MCP two minutes later](docs/agent-demo.gif)
 
-One meeting that never had to happen. The only thing agents can never do is
-grant access — Jane sees the gist because *you* approved it, once:
-`lamdis grant payments jane summary,search`.
+One meeting that never had to happen.
 
 No existing system ships human-approved, per-thread, cross-person grants (mid-2026 survey: admin RBAC, inherited document ACLs, or per-tool-call approval everywhere). This protocol makes human approval a *cryptographically verifiable* property: only `person` principals can sign grants.
 
