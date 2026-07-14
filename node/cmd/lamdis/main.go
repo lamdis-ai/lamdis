@@ -54,6 +54,8 @@ commands:
   peers                       list who you're paired with
   sync [peer] [-watch 30s]    sync permitted threads with peers (default: all)
 
+  share <thread> <peer>       host a thread on another node (e.g. an always-on
+                              hub both of you sync against; run once per thread)
   discover <peer>             see which of a peer's threads you could request
   request <peer> <thread> <scopes> [reason...]   ask for access
   requests                    pending requests on YOUR threads
@@ -169,6 +171,11 @@ func run(args []string) error {
 		return cmdPeers(*dataDir)
 	case "sync":
 		return cmdSync(ctx, *dataDir, s, rest)
+	case "share":
+		if len(rest) != 2 {
+			return usage()
+		}
+		return cmdShare(ctx, *dataDir, s, rest[0], rest[1])
 	case "discover":
 		if len(rest) != 1 {
 			return usage()
@@ -953,5 +960,27 @@ func cmdApprove(ctx context.Context, dataDir string, s store.Store, rest []strin
 		return err
 	}
 	fmt.Printf("✓ approved — they receive it on their next sync\n")
+	return nil
+}
+
+func cmdShare(ctx context.Context, dataDir string, s store.Store, threadRef, peer string) error {
+	thread, err := resolveThread(ctx, s, threadRef)
+	if err != nil {
+		return err
+	}
+	t, err := peerTransport(dataDir, peer)
+	if err != nil {
+		return err
+	}
+	_, pid, err := loadKey(dataDir)
+	if err != nil {
+		return err
+	}
+	client := &syncp.Client{Store: s, Peer: t, Self: pid}
+	n, err := client.ShareThread(ctx, thread)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("✓ %s now hosts the thread (%d entries seeded) — keep `lamdis sync -watch` running and grants decide who can pull it there\n", peer, n)
 	return nil
 }

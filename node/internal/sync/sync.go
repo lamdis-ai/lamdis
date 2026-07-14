@@ -139,39 +139,57 @@ func (s *Server) Pull(ctx context.Context, principal string, req PullRequest) (*
 }
 
 // Push admits entries offered by principal. Rules, all fail-closed:
-// every entry is authored by the caller (or a key delegated to the caller),
-// the author holds contribute in the thread's fold, and only summary and
-// content lanes are writable remotely (control-lane writes are steward
-// actions taken on the steward's own node; access requests come later).
+// every entry is authored by the caller (or a key delegated to the caller);
+// summary/content require the contribute window; control-lane entries are
+// accepted only from the thread's stewards — which is what lets a steward
+// host a thread on a hub node (including bootstrapping it with the genesis)
+// and keep grants/revocations flowing to it on every sync.
 func (s *Server) Push(ctx context.Context, principal string, req PushRequest) (*PushResponse, error) {
-	lanes, err := s.visibleLanes(ctx, req.Thread, principal)
-	if err != nil || len(lanes) == 0 {
-		return nil, fmt.Errorf("thread %s not found", req.Thread)
-	}
+	ordered := orderForAppend(req.Entries, req.Thread)
+	total := len(ordered)
 	tl, err := s.Store.Thread(ctx, req.Thread)
 	if err != nil {
-		return nil, err
+		// Bootstrap: an unknown thread is admitted only when the batch opens
+		// with its genesis, authored by the authenticated principal. Anyone
+		// may host their own thread anywhere they're paired.
+		if len(ordered) == 0 || ordered[0].ID != req.Thread || ordered[0].Author != principal {
+			return nil, fmt.Errorf("thread %s not found", req.Thread)
+		}
+		if err := s.Store.AppendEntries(ctx, ordered[:1]); err != nil {
+			return nil, err
+		}
+		if tl, err = s.Store.Thread(ctx, req.Thread); err != nil {
+			return nil, err
+		}
+		ordered = ordered[1:]
+	} else if lanes, _ := s.visibleLanes(ctx, req.Thread, principal); len(lanes) == 0 {
+		return nil, fmt.Errorf("thread %s not found", req.Thread)
 	}
 	st := perm.Fold(req.Thread, tl.Entries())
-	for _, e := range req.Entries {
+	for _, e := range ordered {
 		if e.Thread != req.Thread {
 			return nil, fmt.Errorf("entry %s belongs to another thread", e.ID)
-		}
-		if e.Lane != protolog.LaneSummary && e.Lane != protolog.LaneContent {
-			return nil, fmt.Errorf("entry %s: lane %s is not remotely writable", e.ID, e.Lane)
 		}
 		if !st.ActsFor(e.Author, principal) {
 			return nil, fmt.Errorf("entry %s: author is not the authenticated principal", e.ID)
 		}
-		if !st.MayContribute(e.Author, e.Lamport) {
-			return nil, fmt.Errorf("entry %s: author lacks contribute on this thread", e.ID)
+		switch e.Lane {
+		case protolog.LaneControl:
+			if !st.Stewards[e.Author] {
+				return nil, fmt.Errorf("entry %s: control lane requires stewardship", e.ID)
+			}
+		case protolog.LaneSummary, protolog.LaneContent:
+			if !st.MayContribute(e.Author, e.Lamport) {
+				return nil, fmt.Errorf("entry %s: author lacks contribute on this thread", e.ID)
+			}
+		default:
+			return nil, fmt.Errorf("entry %s: unknown lane", e.ID)
 		}
 	}
-	ordered := orderForAppend(req.Entries, req.Thread)
 	if err := s.Store.AppendEntries(ctx, ordered); err != nil {
 		return nil, err
 	}
-	return &PushResponse{Accepted: len(ordered)}, nil
+	return &PushResponse{Accepted: total}, nil
 }
 
 // DiscoverableThread is what a hidden-by-default node advertises: existence
@@ -346,6 +364,41 @@ func (c *Client) SyncThread(ctx context.Context, threadID string) (int, error) {
 	return n + pushed, nil
 }
 
+// ShareThread seeds one of our threads onto a peer — the "host this on the
+// hub" verb. It pushes every chain we authored, genesis first; afterwards a
+// normal sync keeps it current in both directions.
+func (c *Client) ShareThread(ctx context.Context, threadID string) (int, error) {
+	tl, err := c.Store.Thread(ctx, threadID)
+	if err != nil {
+		return 0, err
+	}
+	var peerHeads []Head
+	if resp, err := c.Peer.Pull(ctx, PullRequest{Thread: threadID}); err == nil {
+		peerHeads = resp.Heads
+	} // a 404 just means the peer doesn't hold it yet
+	peerSeq := map[protolog.ChainKey]uint64{}
+	for _, h := range peerHeads {
+		peerSeq[protolog.ChainKey{Thread: threadID, Author: h.Author, Lane: h.Lane}] = h.Seq
+	}
+	var offer []*protolog.Entry
+	for key, seq := range tl.Heads() {
+		if !c.actsAsSelf(key.Author) {
+			continue
+		}
+		if seq > peerSeq[key] {
+			offer = append(offer, tl.After(key, peerSeq[key])...)
+		}
+	}
+	if len(offer) == 0 {
+		return 0, nil
+	}
+	resp, err := c.Peer.Push(ctx, PushRequest{Thread: threadID, Entries: offer})
+	if err != nil {
+		return 0, err
+	}
+	return resp.Accepted, nil
+}
+
 // pushBack offers the peer whatever our own summary/content chains hold
 // beyond the peer's heads. Only self-authored chains are pushed: everyone
 // syncs their own writing; everything else arrives by pull.
@@ -361,12 +414,15 @@ func (c *Client) pushBack(ctx context.Context, threadID string, peerHeads []Head
 	for _, h := range peerHeads {
 		peerSeq[protolog.ChainKey{Thread: threadID, Author: h.Author, Lane: h.Lane}] = h.Seq
 	}
+	st := perm.Fold(threadID, tl.Entries())
 	var offer []*protolog.Entry
 	for key, seq := range tl.Heads() {
 		if !c.actsAsSelf(key.Author) {
 			continue
 		}
-		if key.Lane != protolog.LaneSummary && key.Lane != protolog.LaneContent {
+		// Our control chain travels too when we steward the thread — that's
+		// how grants and revocations reach a hub without it asking.
+		if key.Lane == protolog.LaneControl && !st.Stewards[key.Author] {
 			continue
 		}
 		if seq > peerSeq[key] {

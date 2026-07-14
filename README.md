@@ -36,7 +36,8 @@ Early — M0 (core node) in progress:
 - [x] MCP server (`lamdis mcp`, stdio): whoami, list/read/create threads, post_entry (content or summary lane), search_context, sync_peers. Deliberately no grant/revoke tools — approvals are human-signed acts, never tool calls
 - [x] Access requests: `thread new -discoverable` advertises title-only existence; peers `discover` and `request <peer> <thread> <scopes> [reason]`; you answer with `requests` → `approve`/`deny`. Agents can ask over MCP (`request_access`) but never grant
 - [x] **Lamdis Portal**: `lamdis serve` prints a local URL — requests land as cards ("jane wants summary, search on q3 payments migration — 'capacity planning'") with one-click Approve/Deny, live grants with revoke, all served from the binary itself. Portal actions are owner-token-gated and produce the same person-signed entries as the CLI
-- [ ] Hub mode & federation · Postgres/pgvector driver · libp2p transport
+- [x] **Hub relay**: `lamdis share <thread> <hub>` hosts a thread on an always-on node; both sides sync against it and never need to reach each other. Requests, approvals, contributions, and revocations all relay through — and the hub enforces every grant while doing it (a summary-scoped peer gets summaries from the hub, nothing more)
+- [ ] Postgres/pgvector driver (big hubs) · hub-to-hub federation · libp2p transport · TS SDK
 
 ## Under the hood
 
@@ -96,12 +97,25 @@ Commands take a thread's **title** (or any unique fragment of it) and a peer's
 
 With a `contribute,read` grant instead, your coworker's posts flow back to
 your node on their next sync — full two-way collaboration, each side owning
-its own store. Both machines must be reachable from each other (LAN, VPN,
-or SSH/SSM tunnels through a host you both already access). An always-on
-rendezvous hub — a node on shared infrastructure that both sides sync
-against so neither laptop needs to reach the other — is the next milestone:
-it requires a steward-granted hub role so the relay itself holds replicas
-without being a person.
+its own store.
+
+**Can't reach each other (both behind NAT/corp networks)?** Run a hub — the
+same binary on any always-on box you both can reach (a cloud VM, a home
+server):
+
+```sh
+# on the hub box:            # each of you:
+./lamdis init                ./lamdis peer add hub http://<hub-host>:8420
+./lamdis serve               ./lamdis sync -watch 30s
+
+# you, once per thread:
+./lamdis share payments hub   # the hub hosts it; grants still decide who pulls
+```
+
+Requests, approvals, posts, and revocations relay through the hub on each
+side's sync. The hub enforces grants like any node — but it *holds* replicas
+of shared threads, so run it on infrastructure you trust (lane-level
+encryption that blinds hubs is on the roadmap).
 
 ## Quickstart
 
