@@ -120,7 +120,11 @@ func run(args []string) error {
 		if len(rest) != 1 {
 			return usage()
 		}
-		return cmdRead(ctx, s, rest[0])
+		thread, err := resolveThread(ctx, s, rest[0])
+		if err != nil {
+			return err
+		}
+		return cmdRead(ctx, s, thread)
 	case "search":
 		if len(rest) == 0 {
 			return usage()
@@ -631,17 +635,26 @@ func cmdThreads(ctx context.Context, s store.Store) error {
 
 func cmdPost(ctx context.Context, dataDir string, s store.Store, args []string) error {
 	fs := flag.NewFlagSet("post", flag.ContinueOnError)
-	kind := fs.String("kind", protolog.KindMessage, "entry kind")
+	kind := fs.String("kind", "", "entry kind (default core.message; core.summary when -lane summary)")
 	lane := fs.String("lane", string(protolog.LaneContent), "lane: content|summary|control")
 	jsonBody := fs.String("json", "", "raw JSON body (overrides text)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *kind == "" {
+		*kind = protolog.KindMessage
+		if *lane == string(protolog.LaneSummary) {
+			*kind = protolog.KindSummary
+		}
+	}
 	rest := fs.Args()
 	if len(rest) < 1 {
 		return fmt.Errorf("post: thread id required")
 	}
-	threadID := rest[0]
+	threadID, err := resolveThread(ctx, s, rest[0])
+	if err != nil {
+		return err
+	}
 	var body any
 	if *jsonBody != "" {
 		body = json.RawMessage(*jsonBody)
