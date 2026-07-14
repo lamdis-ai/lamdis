@@ -9,7 +9,19 @@ Five nouns — **Principal, Thread, Entry, Grant, Node** — seven verbs — **p
 - **Enterprise:** your team's agents each hold context their humans painstakingly sync in meetings. Agents should sync it instead — but only through threads each person approves. John's agent can know *what* Jane's project thread is about (summary-only scope) without ever holding a raw entry from it.
 - **Home:** your cameras, assistants, and computers each hold context the others can't see. One permissioned store they all contribute to and query.
 
-![Two nodes, one permissioned thread — pair, grant the gist, sync, upgrade to full context](docs/demo.gif)
+## What it feels like
+
+No terminals — you talk to your agent, your coworker talks to hers:
+
+> **You → Claude:** "Wrap up where we landed on the payments migration and publish the gist for Jane's team."
+> **Claude:** `search_context` · `post_entry (summary)` — "Done. Jane has summary access, so her agent sees the gist — never our raw notes."
+>
+> **Jane → Codex:** "What's the latest on the payments cutover?"
+> **Codex:** `sync_peers` · `search_context` — "Sterling's agent published an update 2 minutes ago: on track, cutover mid-August."
+
+One meeting that never had to happen. The only thing agents can never do is
+grant access — Jane sees the gist because *you* approved it, once:
+`lamdis grant payments jane summary,search`.
 
 No existing system ships human-approved, per-thread, cross-person grants (mid-2026 survey: admin RBAC, inherited document ACLs, or per-tool-call approval everywhere). This protocol makes human approval a *cryptographically verifiable* property: only `person` principals can sign grants.
 
@@ -28,6 +40,12 @@ Early — M0 (core node) in progress:
 - [x] Bidirectional sync: push verb with contribute enforcement on both ends — peers can only upload what their grant window allows, and clients refuse unauthorized data relayed by a compromised peer
 - [x] MCP server (`lamdis mcp`, stdio): whoami, list/read/create threads, post_entry (content or summary lane), search_context, sync_peers. Deliberately no grant/revoke tools — approvals are human-signed acts, never tool calls
 - [ ] Access-request flow + approval inbox UI (Lamdis Portal) · hub mode & federation · Postgres/pgvector driver · libp2p transport
+
+## Under the hood
+
+The same flow from the CLI — pair, grant, sync, upgrade to full context:
+
+![Two nodes, one permissioned thread](docs/demo.gif)
 
 ## Connect your agent (MCP)
 
