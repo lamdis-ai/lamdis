@@ -1,153 +1,192 @@
-# Lamdis Protocol
+# lamdis
 
-**Permissioned shared context for agents.** A lightweight, massively extensible protocol that lets agents from different people and different vendors — Claude, Alexa, cameras, custom fleets — communicate and maintain searchable shared context through threads that humans explicitly approve, per thread, per person.
+Permissioned shared context for AI agents.
 
-Five nouns — **Principal, Thread, Entry, Grant, Node** — seven verbs — **post, sync, search, request, grant, revoke, subscribe**. Everything is a signed entry in a per-thread append-only log. Permissions are human-signed grant entries in that same log, so the audit trail *is* the data. Every other capability — sensor readings, camera summaries, task handoffs — is a namespaced entry kind that nodes replicate, store, and index without needing to understand it. The core never grows; the kind registry does.
+lamdis is a protocol and a single-binary node for sharing searchable context
+between people's agents. Context lives in threads: append-only logs of signed
+entries, replicated between nodes. Sharing is per thread and per person, and
+every grant is signed by a human key — an agent can request access, but it
+cannot approve anything, including for itself.
 
-## Why
+Two people who each run a node can pair, share threads at a chosen depth
+(everything, read-only, or summaries only), and let their agents read, post,
+and search over MCP. Nothing is shared until a person grants it, and a grant
+can be revoked at any time.
 
-- **Enterprise:** your team's agents each hold context their humans painstakingly sync in meetings. Agents should sync it instead — but only through threads each person approves. John's agent can know *what* Jane's project thread is about (summary-only scope) without ever holding a raw entry from it.
-- **Home:** your cameras, assistants, and computers each hold context the others can't see. One permissioned store they all contribute to and query.
+![demo: two nodes, one permissioned thread](docs/demo.gif)
 
-## What it feels like
+## Install
 
-No terminals — you talk to your agent, your coworker talks to hers, and the
-context flows because you approved exactly that much sharing, once:
-
-![You ask Claude to publish the gist; Jane's Codex picks it up over MCP two minutes later](docs/agent-demo.gif)
-
-One meeting that never had to happen.
-
-No existing system ships human-approved, per-thread, cross-person grants (mid-2026 survey: admin RBAC, inherited document ACLs, or per-tool-call approval everywhere). This protocol makes human approval a *cryptographically verifiable* property: only `person` principals can sign grants.
-
-## Status
-
-Early — M0 (core node) in progress:
-
-- [x] Entry envelope: signed, content-hashed, per-(thread, author, lane) chains (`node/internal/log`)
-- [x] Deterministic total order + version-vector sync primitives, permutation-convergence tested
-- [x] SQLite store: FTS5 (porter) + local vector index + RRF hybrid search, lane-scoped in-query (`node/internal/store`)
-- [x] Embedder: one OpenAI-compatible wire shape (OpenAI / Ollama / LM Studio / llama.cpp) (`node/internal/embed`)
-- [x] CLI: `init`, `thread new`, `post`, `read`, `search`
-- [x] Permission engine: person-signed grants, four scopes, deny-wins fold, TTL, delegations (`node/internal/perm`)
-- [x] P2P sync: signed HTTP between paired nodes, permission-filtered serving — a summary-scoped peer never receives a content byte (`node/internal/sync`, `node/internal/api`)
-- [x] CLI: `serve`, `peer add`, `sync [-watch 30s]`, `grant`, `revoke`, `access`
-- [x] Bidirectional sync: push verb with contribute enforcement on both ends — peers can only upload what their grant window allows, and clients refuse unauthorized data relayed by a compromised peer
-- [x] MCP server (`lamdis mcp`, stdio): whoami, list/read/create threads, post_entry (content or summary lane), search_context, sync_peers. Deliberately no grant/revoke tools — approvals are human-signed acts, never tool calls
-- [x] Access requests: `thread new -discoverable` advertises title-only existence; peers `discover` and `request <peer> <thread> <scopes> [reason]`; you answer with `requests` → `approve`/`deny`. Agents can ask over MCP (`request_access`) but never grant
-- [x] **Lamdis Portal**: `lamdis serve` prints a local URL — requests land as cards ("jane wants summary, search on q3 payments migration — 'capacity planning'") with one-click Approve/Deny, live grants with revoke, all served from the binary itself. Portal actions are owner-token-gated and produce the same person-signed entries as the CLI
-- [x] **Hub relay**: `lamdis share <thread> <hub>` hosts a thread on an always-on node; both sides sync against it and never need to reach each other. Requests, approvals, contributions, and revocations all relay through — and the hub enforces every grant while doing it (a summary-scoped peer gets summaries from the hub, nothing more)
-- [ ] Postgres/pgvector driver (big hubs) · hub-to-hub federation · libp2p transport · TS SDK
-
-## Under the hood
-
-The same flow from the CLI — pair, grant, sync, upgrade to full context:
-
-![Two nodes, one permissioned thread](docs/demo.gif)
-
-## Connect your agent (MCP)
-
-```jsonc
-// .mcp.json (Claude Code, or any MCP client)
-{ "mcpServers": { "lamdis": { "command": "lamdis", "args": ["mcp"] } } }
-```
-
-Your agent can then post working context to threads, publish shareable
-summaries (`post_entry` with `lane: summary` — that's what summary-scoped
-peers see), search everything you hold, and `sync_peers` before answering
-freshness-sensitive questions.
-
-## Two-person quickstart (you + a coworker)
-
-```sh
-# each of you, once:
-./lamdis init                          # creates your identity (a keypair)
-./lamdis serve -addr :8420             # keep running (LAN, Tailscale, or tunnel)
-
-# pair by URL — identities are exchanged automatically, like adding a contact:
-./lamdis peer add jane http://<janes-host>:8420
-#   ✓ paired with jane (ed25519:QZHP…)
-
-# you, working:
-./lamdis thread new "q3 payments migration"
-./lamdis post payments "raw working notes stay private"
-./lamdis post -kind core.summary -lane summary -json '{"text":"migration on track, cutover mid-August"}' payments
-
-# teammates get everything — full questions, answers, what you tried:
-./lamdis grant payments jane contribute,read,search
-
-# or share only the gist (awareness without the raw notes):
-./lamdis grant -ttl 168h payments jane summary,search
-./lamdis access payments               # who sees this thread, and how much
-./lamdis revoke payments jane          # stop sharing any time
-
-# jane:
-./lamdis sync -watch 30s               # receives exactly what her scope allows
-./lamdis search cutover
-```
-
-**Pick the depth per relationship:** `contribute,read,search` for the
-teammates you work with daily (full context, both directions — the normal
-grant); `read,search` for see-everything-post-nothing; `summary,search` for
-people who should know *what's happening* but never hold your raw notes —
-the scope that makes org-wide agent sharing possible at all.
-
-Commands take a thread's **title** (or any unique fragment of it) and a peer's
-**name** — the `ed25519:` strings exist underneath, but you never type them.
-
-With a `contribute,read` grant instead, your coworker's posts flow back to
-your node on their next sync — full two-way collaboration, each side owning
-its own store.
-
-**Can't reach each other (both behind NAT/corp networks)?** Run a hub — the
-same binary on any always-on box you both can reach (a cloud VM, a home
-server):
-
-```sh
-# on the hub box:            # each of you:
-./lamdis init                ./lamdis peer add hub http://<hub-host>:8420
-./lamdis serve               ./lamdis sync -watch 30s
-
-# you, once per thread:
-./lamdis share payments hub   # the hub hosts it; grants still decide who pulls
-```
-
-Requests, approvals, posts, and revocations relay through the hub on each
-side's sync. The hub enforces grants like any node — but it *holds* replicas
-of shared threads, so run it on infrastructure you trust (lane-level
-encryption that blinds hubs is on the roadmap).
-
-## Quickstart
+Download a binary from [releases](https://github.com/lamdis-ai/lamdis/releases)
+(macOS, Linux, Windows; no dependencies), or build from source:
 
 ```sh
 cd node && go build -o lamdis ./cmd/lamdis
-
-./lamdis init
-T=$(./lamdis thread new "pool project")
-./lamdis post $T "pool pump arrived, sitting in the garage"
-./lamdis search pump
-
-# semantic search: point at any OpenAI-compatible embeddings endpoint
-export LAMDIS_EMBED_URL=http://localhost:11434/v1   # e.g. Ollama
-export LAMDIS_EMBED_MODEL=nomic-embed-text
-./lamdis search "what arrived for the pool"
 ```
 
-## Layout & licensing
+## Quick start
 
-| Path | What | License |
+```sh
+lamdis init                                # create your identity (a keypair)
+lamdis thread new "pool project"
+lamdis post pool "pump arrived, sitting in the garage"
+lamdis search pump
+```
+
+Search is full-text by default. For semantic search, point the node at any
+OpenAI-compatible embeddings endpoint:
+
+```sh
+export LAMDIS_EMBED_URL=http://localhost:11434/v1   # e.g. Ollama
+export LAMDIS_EMBED_MODEL=nomic-embed-text
+```
+
+## Sharing with another person
+
+Each person runs their own node. Pair once by URL; identities are exchanged
+automatically:
+
+```sh
+lamdis serve                                     # both sides keep this running
+lamdis peer add jane http://<janes-host>:8420
+
+lamdis grant payments jane contribute,read,search   # full collaboration
+lamdis grant payments jane summary,search           # or: the gist only
+lamdis access payments                              # who sees this thread
+lamdis revoke payments jane
+```
+
+Commands take a thread's title (or a unique fragment of it) and a peer's
+name. The other side runs `lamdis sync` (or `sync -watch 30s`) to exchange
+entries.
+
+Scopes:
+
+| scope | grants |
+|---|---|
+| `contribute` | append entries |
+| `read` | replicate and read the whole thread |
+| `summary` | replicate the summary lane only; raw entries are never transmitted |
+| `search` | query; results are filtered to the holder's read level |
+
+The summary scope is enforced at the sender: entries a peer is not entitled
+to are not filtered on arrival, they are never sent.
+
+## Access requests
+
+Threads are hidden by default. A discoverable thread advertises its title so
+peers can ask for access:
+
+```sh
+lamdis thread new -discoverable "q3 payments migration"
+
+# the other side:
+lamdis discover you
+lamdis request you payments summary,search "capacity planning"
+
+# you:
+lamdis requests
+lamdis approve payments jane        # grants what was asked; or pass scopes
+lamdis deny payments jane
+```
+
+`lamdis serve` also prints a URL for the portal, a local web page where
+pending requests can be approved or denied and grants revoked. The portal is
+authenticated by a local token, not by peer credentials; a decision made
+there produces the same person-signed entry as the CLI.
+
+## Hubs
+
+If two nodes cannot reach each other (both behind NAT), run a third node on
+a machine both can reach and relay through it:
+
+```sh
+# on the hub machine:
+lamdis init && lamdis serve
+
+# each person:
+lamdis peer add hub http://<hub-host>:8420
+lamdis sync -watch 30s
+
+# the thread owner, once per thread:
+lamdis share payments hub
+```
+
+Requests, approvals, posts, and revocations relay through the hub, which
+enforces grants like any other node. The hub holds replicas of shared
+threads, so run it on infrastructure you trust.
+
+## Agents (MCP)
+
+Every node is an MCP server:
+
+```json
+{ "mcpServers": { "lamdis": { "command": "lamdis", "args": ["mcp"] } } }
+```
+
+Tools: `list_threads`, `read_thread`, `create_thread`, `post_entry`,
+`search_context`, `sync_peers`, `request_access`, `list_access_requests`,
+`whoami`. There are intentionally no grant, approve, or revoke tools;
+access decisions are made by humans in the CLI or the portal.
+
+![demo: agents sharing context over MCP](docs/agent-demo.gif)
+
+## How it works
+
+- An identity is an Ed25519 keypair. People, agents, and devices are
+  principals; only person keys can sign grants.
+- A thread is a set of hash-chained, signed entry logs, one per
+  (author, lane). Entries are immutable; edits supersede, deletes are
+  tombstones.
+- Entries carry a lane: `control` (membership, grants — replicated to every
+  member), `summary`, or `content`. Lanes are the unit of permission
+  filtering during sync.
+- Grants, denials, and revocations are themselves control-lane entries, so
+  the audit trail is the thread and replicates with it. Conflicts resolve
+  deterministically; a deny beats a concurrent grant.
+- Sync exchanges per-chain version vectors and streams missing entries,
+  filtered by the caller's scopes before sending. Receivers re-validate
+  every signature and chain position, and reject entries whose author never
+  held contribute.
+- Embeddings are computed and stored locally and never leave a node. Search
+  queries travel as text; each node answers from its own index.
+- Entry kinds are namespaced (`core.*` is reserved). Nodes replicate, store,
+  and index unknown kinds without interpreting them.
+
+The wire format is JSON over HTTP with Ed25519 request signatures. See
+[spec/protocol.md](spec/protocol.md) for the draft specification and
+[spec/schemas](spec/schemas) for the entry schema.
+
+## Security model and limitations
+
+This is pre-release software; the wire format may change without
+compatibility. Current limitations to weigh before relying on it:
+
+- Transport is plain HTTP. Requests are signed and tamper-evident, but
+  payloads are readable on the wire: pair over a LAN, VPN, or SSH tunnel.
+- Enforcement assumes honest nodes. There is no end-to-end encryption yet;
+  a node you sync with holds what you granted it, and revocation stops
+  future replication but cannot recall data already replicated.
+- Lamport clocks are author-asserted. A revoked author could backdate
+  entries into their old grant window.
+- Keys are stored unencrypted in the data directory, and there is no key
+  rotation or recovery.
+
+## Repository layout
+
+| path | contents | license |
 |---|---|---|
-| `spec/` | Protocol spec, JSON Schemas, conformance vectors | Apache-2.0 |
-| `sdk/typescript/` | `@lamdis/sdk` typed client | Apache-2.0 |
-| `node/` | The `lamdis` node/hub binary (Go, no cgo) | FSL-1.1-MIT |
-| `ui/` | Approval inbox + thread browser (embedded in the binary) | FSL-1.1-MIT |
+| `spec/` | protocol specification, schemas, conformance fixtures | Apache-2.0 |
+| `sdk/typescript/` | TypeScript client (planned) | Apache-2.0 |
+| `node/` | the `lamdis` node: store, sync, permissions, portal, MCP | FSL-1.1-MIT |
+| `ui/` | reserved for the portal's successor | FSL-1.1-MIT |
 
-The protocol is open (Apache-2.0) so anyone can implement a node; this reference server is fair-source (FSL converts to MIT after two years).
+The specification is Apache-2.0 so anyone can implement it. The reference
+node is [Functional Source License](LICENSE); each release converts to MIT
+after two years.
 
-## Design invariants
+## Roadmap
 
-- Only humans sign grants; agents act `on_behalf_of` a person via signed delegations. Provenance bottoms out at a person, cryptographically.
-- Lanes (`control` / `summary` / `content`) are the replication *and* permission classes — a summary-scoped peer never *holds* raw entries, not "holds but shouldn't read."
-- Deny by default, everywhere: an empty lane scope is an error, never "everything."
-- Embeddings are node-local. Queries travel as text; vectors never cross the wire. Any node can change embedding models with a local reindex and zero coordination.
-- Deny/revoke beats grant under concurrency. The fold is deterministic; it fails closed.
+Postgres/pgvector storage for large hubs, hub-to-hub federation, TLS,
+delegated agent keys, libp2p transport, end-to-end encrypted lanes, a
+TypeScript SDK, and a frozen v0.1 specification with conformance vectors.
