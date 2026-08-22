@@ -1,0 +1,424 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// The exchange tools are how an agent reaches the physical world.
+//
+// Everything else an agent can do is reading. These four are the ones that
+// touch reality: ask whether something is true out there, ask for something to
+// be done, watch it happen, and take the receipt.
+//
+// The agent authenticates with a key its person issued, and every job it posts
+// spends that person's balance under limits that person set. There is
+// deliberately no tool for issuing a key, raising a limit, or approving a
+// payout: an agent that could widen its own budget has no budget, and the one
+// place a human decision is required must stay a human decision.
+type Exchange struct {
+	// BaseURL is the exchange this agent talks to.
+	BaseURL string
+	// Key is the agent credential, issued by the person it acts for.
+	Key  string
+	HTTP *http.Client
+}
+
+func NewExchange(baseURL, key string) *Exchange {
+	return &Exchange{BaseURL: strings.TrimRight(baseURL, "/"), Key: key,
+		HTTP: &http.Client{Timeout: 30 * time.Second}}
+}
+
+func (x *Exchange) call(ctx context.Context, method, path string, in any) (map[string]any, error) {
+	var body *strings.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return nil, err
+		}
+		body = strings.NewReader(string(b))
+	} else {
+		body = strings.NewReader("")
+	}
+	req, err := http.NewRequestWithContext(ctx, method, x.BaseURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Lamdis-Key", x.Key)
+	resp, err := x.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("the exchange returned something unreadable")
+	}
+	if resp.StatusCode >= 400 {
+		msg, _ := out["error"].(string)
+		if msg == "" {
+			msg = resp.Status
+		}
+		return out, fmt.Errorf("%s", msg)
+	}
+	return out, nil
+}
+
+// RegisterExchange adds the tools to an MCP server.
+func RegisterExchange(s *sdk.Server, x *Exchange) {
+	type observeArgs struct {
+		Predicate  string  `json:"predicate" jsonschema:"what must be true, stated so a stranger with a camera could check it. Shown on the open board, so keep the exact address out of it unless that address is already public"`
+		Where      string  `json:"where,omitempty" jsonschema:"the exact address or place to check; released only to whoever takes the job, never published"`
+		Area       string  `json:"area,omitempty" jsonschema:"coarse locality shown on the open board, e.g. a neighbourhood or town; never put the exact address here"`
+		Lat        float64 `json:"lat,omitempty" jsonschema:"latitude to fence the evidence to"`
+		Lon        float64 `json:"lon,omitempty" jsonschema:"longitude to fence the evidence to"`
+		RadiusM    int64   `json:"radius_m,omitempty" jsonschema:"how far from that point evidence may be taken"`
+		FeeMinor   int64   `json:"fee_minor" jsonschema:"paid for usable evidence whichever way the answer turns out, in minor units"`
+		BonusMinor int64   `json:"bonus_minor,omitempty" jsonschema:"paid additionally if the predicate holds"`
+		Slots      int     `json:"slots,omitempty" jsonschema:"how many independent people should check (default 1)"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "observe_world",
+		Description: "Find out whether something is true in the physical world. " +
+			"Somebody goes and photographs it; the evidence is checked; you get an answer " +
+			"or your money back. Pays for honest evidence either way, so a 'no' is as " +
+			"reliable as a 'yes'."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a observeArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "POST", "/v1/tasks", map[string]any{
+				"kind": "observe", "predicate": a.Predicate, "where": a.Where,
+				"area": a.Area,
+				"lat":  a.Lat, "lon": a.Lon, "radius_m": a.RadiusM,
+				"fee_minor": a.FeeMinor, "bonus_minor": a.BonusMinor, "slots": a.Slots,
+			})
+			return jobResult(out, err)
+		})
+
+	// stageArg is one payable piece of a longer job.
+	type stageArg struct {
+		Name        string `json:"name" jsonschema:"what this piece is called, e.g. base course"`
+		Deliverable string `json:"deliverable" jsonschema:"what would prove this piece specifically is done"`
+		PayMinor    int64  `json:"pay_minor" jsonschema:"what this piece earns, in minor units"`
+		Materials   bool   `json:"materials,omitempty" jsonschema:"true when this is reimbursement for supplies bought up front, paid against a receipt rather than against finished work"`
+	}
+
+	type doArgs struct {
+		Predicate             string     `json:"predicate" jsonschema:"what should be true once the job is done. Shown on the open board, so keep the exact address out of it"`
+		Instructions          string     `json:"instructions" jsonschema:"what the person should actually do"`
+		Deliverable           string     `json:"deliverable,omitempty" jsonschema:"what proof to bring back, e.g. a photo of the parcel at the door with the house number visible"`
+		Where                 string     `json:"where,omitempty" jsonschema:"the exact address; released only to whoever takes the job, never published"`
+		Area                  string     `json:"area,omitempty" jsonschema:"coarse locality shown on the open board, e.g. a neighbourhood or town; never put the exact address here"`
+		Lat                   float64    `json:"lat,omitempty"`
+		Lon                   float64    `json:"lon,omitempty"`
+		RadiusM               int64      `json:"radius_m,omitempty" jsonschema:"how far from that point the evidence may be taken"`
+		FeeMinor              int64      `json:"fee_minor" jsonschema:"paid on completion, in minor units"`
+		AttemptMinor          int64      `json:"attempt_minor,omitempty" jsonschema:"paid for a documented failed attempt, e.g. the shop was shut"`
+		ExpenseCapMinor       int64      `json:"expense_cap_minor,omitempty" jsonschema:"how much they may lay out and reclaim against a receipt"`
+		Skills                []string   `json:"skills,omitempty" jsonschema:"qualifications required, e.g. hvac, electrical, plumbing, refrigerant, locksmith, drone, cdl, notary, ladder, vehicle, lifting, cleaning, assembly, photography"`
+		ProjectID             string     `json:"project_id,omitempty" jsonschema:"the budget envelope this job draws on, from open_project"`
+		DirectTo              string     `json:"direct_to,omitempty" jsonschema:"send this to one of your approved vendors instead of the open board. No auction, no strangers, invisible to everybody else"`
+		SiteID                string     `json:"site_id,omitempty" jsonschema:"a location from your site list, instead of typing an address"`
+		Reference             string     `json:"reference,omitempty" jsonschema:"your purchase order, cost centre or work order. Carried to the receipt untouched"`
+		RequireInsuredToMinor int64      `json:"require_insured_to_minor,omitempty" jsonschema:"refuse anybody whose verified public liability cover is below this"`
+		WorkHours             int        `json:"work_hours,omitempty" jsonschema:"how long the work takes. Set this for anything longer than an errand, or the job is treated as abandoned partway through"`
+		Stages                []stageArg `json:"stages,omitempty" jsonschema:"cut a long job into pieces that are each evidenced and paid as they are finished. Their pay must add up to fee_minor"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "do_in_world",
+		Description: "Have somebody go and do something physical — put up a sign, collect " +
+			"and deliver a parcel, check a meter — and bring back proof. Paid on completion. " +
+			"Set attempt_minor so somebody who travels to an impossible job is not left with nothing."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a doArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "POST", "/v1/tasks", map[string]any{
+				"kind": "do", "predicate": a.Predicate, "instructions": a.Instructions,
+				"deliverable": a.Deliverable, "where": a.Where, "area": a.Area,
+				"lat": a.Lat, "lon": a.Lon, "radius_m": a.RadiusM,
+				"fee_minor": a.FeeMinor, "attempt_minor": a.AttemptMinor,
+				"expense_cap_minor": a.ExpenseCapMinor, "skills": a.Skills,
+				"work_hours": a.WorkHours, "stages": a.Stages,
+				"project_id": a.ProjectID, "direct_to": a.DirectTo,
+				"site_id": a.SiteID, "reference": a.Reference,
+				"require_insured_to_minor": a.RequireInsuredToMinor,
+			})
+			return jobResult(out, err)
+		})
+
+	type jobArgs struct {
+		Job string `json:"job" jsonschema:"the job id returned when it was posted"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "job_status",
+		Description: "Where a job has got to: whether anybody has taken it, what they " +
+			"submitted, whether it passed checking, and what was paid."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a jobArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/jobs/"+a.Job, nil)
+			return jobResult(out, err)
+		})
+
+	sdk.AddTool(s, &sdk.Tool{Name: "job_receipt",
+		Description: "The signed receipt for a finished job. It states what was asked, " +
+			"what evidence arrived, what was concluded and what moved, and can be verified " +
+			"by anyone without trusting the exchange."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a jobArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/jobs/"+a.Job+"/receipt", nil)
+			return jobResult(out, err)
+		})
+
+	sdk.AddTool(s, &sdk.Tool{Name: "job_evidence",
+		Description: "The actual files somebody brought back for a job — photographs, " +
+			"video, transcripts — with where each one says it was taken and whether the " +
+			"challenge code was found in it. Use this when the verdict alone is not " +
+			"enough and you want to look at what was bought, or show it to the person " +
+			"you are acting for. Each file comes with a url you can fetch."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a jobArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/jobs/"+a.Job+"/evidence", nil)
+			return jobResult(out, err)
+		})
+
+	// The read primitives an orchestrator needs before any write.
+	type quoteArgs struct {
+		Kind         string   `json:"kind,omitempty" jsonschema:"observe or do (default do)"`
+		Predicate    string   `json:"predicate,omitempty" jsonschema:"what you are thinking of asking for"`
+		Detail       string   `json:"detail,omitempty" jsonschema:"the scope, as far as you know it"`
+		Instructions string   `json:"instructions,omitempty"`
+		Skills       []string `json:"skills,omitempty" jsonschema:"qualifications the work would need"`
+		Lat          float64  `json:"lat,omitempty"`
+		Lon          float64  `json:"lon,omitempty"`
+		Slots        int      `json:"slots,omitempty"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "check_feasible",
+		Description: "Ask whether anybody could do a job, before committing any " +
+			"money. Answers how much supply is reachable for that place and " +
+			"those qualifications, whether the job would be refused, and what " +
+			"work of this shape has actually been paid here if enough of it " +
+			"has. Holds nothing.\n\n" +
+			"It does not tell you what the work costs. This exchange has no idea " +
+			"— a driveway varies by yard, by region, by season and by what is " +
+			"under the old surface. Work the ceiling out yourself from what your " +
+			"person will pay, then post for bids: the people who do the work are " +
+			"the ones who know the price, which is what the bidding round is for."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a quoteArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "POST", "/v1/quote", map[string]any{
+				"kind": a.Kind, "predicate": a.Predicate,
+				"detail": a.Detail, "instructions": a.Instructions,
+				"skills": a.Skills, "lat": a.Lat, "lon": a.Lon, "slots": a.Slots,
+			})
+			return jobResult(out, err)
+		})
+
+	type projectArgs struct {
+		Title       string `json:"title" jsonschema:"what the person actually asked for, in their words"`
+		BudgetMinor int64  `json:"budget_minor" jsonschema:"the ceiling for everything under this plan, in minor units"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "open_project",
+		Description: "Start a budget envelope several jobs share. Use this when " +
+			"one request turns into more than one job — a survey and then the " +
+			"work it informs, or stages bought separately. Jobs attached to it " +
+			"draw the budget down, and a job that would exceed it is refused " +
+			"with the amount remaining rather than failing as an escrow error " +
+			"part-way through your plan."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a projectArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "POST", "/v1/projects", map[string]any{
+				"title": a.Title, "budget_minor": a.BudgetMinor,
+			})
+			return jobResult(out, err)
+		})
+
+	type projectRef struct {
+		Project string `json:"project" jsonschema:"the project id"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "project_status",
+		Description: "What a plan has cost so far and what is left: every job " +
+			"under it, what is committed, what is spent, what came back, and " +
+			"the remaining budget. The question to ask before deciding what to " +
+			"do next."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a projectRef) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/projects/"+a.Project, nil)
+			return jobResult(out, err)
+		})
+
+	type cancelArgs struct {
+		Job    string `json:"job"`
+		Reason string `json:"reason,omitempty" jsonschema:"why the plan changed"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "cancel_job",
+		Description: "Withdraw a job nobody has taken yet and release its " +
+			"escrow. Use this when what you learned changes the plan — a survey " +
+			"that makes later work pointless, a quote that comes back too high. " +
+			"Refused once somebody is holding the job or has done it: cancelling " +
+			"out from under a person standing at the address is not something " +
+			"this exchange does."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a cancelArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "POST", "/v1/jobs/"+a.Job+"/cancel",
+				map[string]any{"reason": a.Reason})
+			return jobResult(out, err)
+		})
+
+	type sweepArgs struct {
+		Predicate    string   `json:"predicate" jsonschema:"what should be true at each location once done"`
+		Instructions string   `json:"instructions,omitempty"`
+		Deliverable  string   `json:"deliverable,omitempty"`
+		Sites        []string `json:"sites" jsonschema:"site ids from your site list"`
+		Sweep        string   `json:"sweep,omitempty" jsonschema:"what to call this round of work"`
+		FeeMinor     int64    `json:"fee_minor" jsonschema:"paid per location"`
+		DirectTo     string   `json:"direct_to,omitempty" jsonschema:"send it all to one approved vendor instead of the open board"`
+		Reference    string   `json:"reference,omitempty" jsonschema:"your purchase order or cost centre, carried to every receipt"`
+		Skills       []string `json:"skills,omitempty"`
+		Tier         string   `json:"tier,omitempty"`
+		WorkHours    int      `json:"work_hours,omitempty"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "sweep_sites",
+		Description: "Describe work once and post it at many of your locations. " +
+			"Each site becomes its own job, evidenced and paid separately, all " +
+			"under one budget envelope you can watch with project_status. Use " +
+			"this for anything that is 'the same thing at every store' — a " +
+			"monthly compliance photo, a seasonal check, a fixture audit. " +
+			"Addresses and access notes come from your site list rather than " +
+			"being retyped, and your reference is carried to every receipt."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a sweepArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "POST", "/v1/tasks/sweep", map[string]any{
+				"kind": "observe", "predicate": a.Predicate,
+				"instructions": a.Instructions, "deliverable": a.Deliverable,
+				"sites": a.Sites, "sweep": a.Sweep,
+				"fee_minor": a.FeeMinor, "direct_to": a.DirectTo,
+				"reference": a.Reference, "skills": a.Skills,
+				"tier": a.Tier, "work_hours": a.WorkHours,
+			})
+			return jobResult(out, err)
+		})
+
+	sdk.AddTool(s, &sdk.Tool{Name: "list_vendors",
+		Description: "The suppliers this account has approved, with any rates " +
+			"agreed with them. Work directed to one of these skips the open " +
+			"board and runs no auction, because the price was settled elsewhere."},
+		func(ctx context.Context, req *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/vendors", nil)
+			return jobResult(out, err)
+		})
+
+	sdk.AddTool(s, &sdk.Tool{Name: "list_sites",
+		Description: "This account's locations, with the ids sweep_sites and " +
+			"do_in_world take. Using a site id instead of typing an address " +
+			"also carries that location's access notes to whoever takes the job."},
+		func(ctx context.Context, req *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/sites", nil)
+			return jobResult(out, err)
+		})
+
+	type openArgs struct {
+		Predicate    string   `json:"predicate" jsonschema:"what should be true once the job is done. Shown on the open board, so keep the exact address out of it"`
+		Instructions string   `json:"instructions" jsonschema:"what the person should actually do"`
+		Where        string   `json:"where,omitempty" jsonschema:"the exact address; released only to whoever takes the job, never published"`
+		Area         string   `json:"area,omitempty" jsonschema:"coarse locality shown on the open board, e.g. a neighbourhood or town; never put the exact address here"`
+		Lat          float64  `json:"lat,omitempty"`
+		Lon          float64  `json:"lon,omitempty"`
+		RadiusM      int64    `json:"radius_m,omitempty"`
+		MaxBidMinor  int64    `json:"max_bid_minor" jsonschema:"the most you will pay, in minor units; this is what gets held"`
+		BidsCloseIn  int64    `json:"bids_close_in_hours,omitempty" jsonschema:"how long to collect offers (default 24)"`
+		Deliverable  string   `json:"deliverable,omitempty" jsonschema:"what proof to bring back"`
+		Skills       []string `json:"skills,omitempty" jsonschema:"qualifications required, e.g. hvac, electrical, plumbing, refrigerant, locksmith, drone, cdl, notary, ladder, vehicle, lifting, cleaning, assembly, photography"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "request_quotes",
+		Description: "Post a job you do not know the price of and collect offers. Use this " +
+			"when the cost depends on the specifics — mowing a lawn, clearing a gutter, a " +
+			"repair — rather than guessing a figure that either overpays or sits unclaimed. " +
+			"max_bid_minor is the ceiling you are willing to pay. It is NOT held: " +
+			"asking a price does not cost you the maximum, so you can price " +
+			"several approaches to the same problem in parallel. It is reserved " +
+			"against your balance, so you cannot solicit more in quotes than you " +
+			"could honour, and escrow happens when you accept a bid."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a openArgs) (*sdk.CallToolResult, any, error) {
+			hours := a.BidsCloseIn
+			if hours == 0 {
+				hours = 24
+			}
+			out, err := x.call(ctx, "POST", "/v1/tasks", map[string]any{
+				"kind": "do", "predicate": a.Predicate, "instructions": a.Instructions,
+				"deliverable": a.Deliverable, "where": a.Where, "area": a.Area,
+				"lat": a.Lat, "lon": a.Lon, "radius_m": a.RadiusM,
+				"pricing": "bids", "max_bid_minor": a.MaxBidMinor,
+				"bids_close_in_hours": hours, "fee_minor": a.MaxBidMinor,
+				"skills": a.Skills,
+			})
+			return jobResult(out, err)
+		})
+
+	sdk.AddTool(s, &sdk.Tool{Name: "list_bids",
+		Description: "The offers on an open job: what each person would charge, when they " +
+			"could do it, and what they said about how. Show these to your human rather " +
+			"than picking on price alone."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a jobArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/jobs/"+a.Job+"/bids", nil)
+			return jobResult(out, err)
+		})
+
+	type acceptArgs struct {
+		Job string `json:"job"`
+		Bid string `json:"bid" jsonschema:"the bid id from list_bids"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "accept_bid",
+		Description: "Accept one offer. The amount becomes the price and the work begins. " +
+			"Check with your human first unless they told you a ceiling and to just get on " +
+			"with it."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a acceptArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "POST", "/v1/jobs/"+a.Job+"/award",
+				map[string]any{"bid": a.Bid})
+			return jobResult(out, err)
+		})
+
+	type findOutArgs struct {
+		Question     string `json:"question" jsonschema:"what you need found out, e.g. quotes for a new water heater"`
+		Where        string `json:"where,omitempty" jsonschema:"the address it concerns"`
+		Instructions string `json:"instructions" jsonschema:"how to go about it, e.g. call three local installers"`
+		Rows         int    `json:"rows,omitempty" jsonschema:"how many results to collect, e.g. 3 quotes"`
+		FeeMinor     int64  `json:"fee_minor" jsonschema:"what this is worth to you, in minor units"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "find_out",
+		Description: "Pay somebody to go and find something out, and get a structured answer " +
+			"back rather than a photograph. Use for quotes, availability, opening hours, " +
+			"stock — anything where the deliverable is information. Each result comes back " +
+			"as provider, price, availability and notes, so you can act on it without parsing prose."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a findOutArgs) (*sdk.CallToolResult, any, error) {
+			rows := a.Rows
+			if rows == 0 {
+				rows = 3
+			}
+			out, err := x.call(ctx, "POST", "/v1/tasks", map[string]any{
+				"kind": "do", "predicate": a.Question, "instructions": a.Instructions,
+				"where": a.Where, "fee_minor": a.FeeMinor,
+				"deliverable": fmt.Sprintf("%d results", rows),
+				"report": []map[string]any{
+					{"name": "provider", "label": "Who", "kind": "text", "required": true, "repeats": true},
+					{"name": "price", "label": "Quoted price", "kind": "money", "repeats": true},
+					{"name": "available", "label": "Earliest date", "kind": "date", "repeats": true},
+					{"name": "phone", "label": "Contact", "kind": "phone", "repeats": true},
+					{"name": "notes", "label": "Anything else", "kind": "text", "repeats": true},
+				},
+			})
+			return jobResult(out, err)
+		})
+
+	sdk.AddTool(s, &sdk.Tool{Name: "exchange_balance",
+		Description: "What this agent's account holds, what is committed to open jobs, " +
+			"and what remains spendable under the limits its person set."},
+		func(ctx context.Context, req *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/agent/balance", nil)
+			return jobResult(out, err)
+		})
+}
+
+func jobResult(out map[string]any, err error) (*sdk.CallToolResult, any, error) {
+	if err != nil {
+		return &sdk.CallToolResult{
+			IsError: true,
+			Content: []sdk.Content{&sdk.TextContent{Text: err.Error()}},
+		}, nil, nil
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	return &sdk.CallToolResult{
+		Content: []sdk.Content{&sdk.TextContent{Text: string(b)}},
+	}, out, nil
+}

@@ -65,6 +65,17 @@ func (l *ThreadLog) Heads() map[ChainKey]uint64 {
 	return vv
 }
 
+// HeadHashes returns each chain's full head: seq and last entry hash. Heads
+// carries only seq because that is all sync needs; artifacts that commit to a
+// thread's exact position — attestations — need the hashes too.
+func (l *ThreadLog) HeadHashes() map[ChainKey]ChainHead {
+	hh := make(map[ChainKey]ChainHead, len(l.heads))
+	for k, h := range l.heads {
+		hh[k] = h
+	}
+	return hh
+}
+
 // Missing returns, for each chain the remote holds, the seq after which we
 // need entries. Chains we've never seen are requested from 0.
 func (l *ThreadLog) Missing(remote map[ChainKey]uint64) map[ChainKey]uint64 {

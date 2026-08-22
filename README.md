@@ -172,6 +172,23 @@ compatibility. Current limitations to weigh before relying on it:
 - Keys are stored unencrypted in the data directory, and there is no key
   rotation or recovery.
 
+### Running the exchange
+
+The exchange pays real people for physical work, which brings obligations the
+protocol itself does not have. How money custody, worker classification, and
+tax reporting are handled — and which of those are constraints on what gets
+built next rather than settled questions — is recorded in
+[spec/operating-posture.md](spec/operating-posture.md).
+
+Two limits worth knowing before relying on it:
+
+- Uploaded evidence is held in memory and does not survive a restart. Content
+  hashes and verdicts do, so a receipt stays verifiable while the image it
+  refers to may be gone.
+- The exchange's own storage is not durable in the reference deployment. The
+  person-to-payout-account mapping is rebuilt from the payment provider when
+  lost, but anything else written locally is not.
+
 ## Repository layout
 
 | path | contents | license |

@@ -1,0 +1,289 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"encoding/hex"
+	"flag"
+	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/lamdis-ai/lamdis-protocol/node/internal/api"
+	"github.com/lamdis-ai/lamdis-protocol/node/internal/exchange"
+	protolog "github.com/lamdis-ai/lamdis-protocol/node/internal/log"
+	"github.com/lamdis-ai/lamdis-protocol/node/internal/media"
+	"github.com/lamdis-ai/lamdis-protocol/node/internal/vision"
+)
+
+// cmdServeExchange runs the exchange as a service.
+//
+// Two things are configuration rather than derived, both for the same reason:
+// the exchange's identity must survive a restart, and a reviewer link must
+// point at an address a phone can actually reach. Deriving either from the
+// request or generating it at boot would break the moment there is more than
+// one task, or the moment a task is replaced.
+func cmdServeExchange(args []string) error {
+	fs := flag.NewFlagSet("exchange", flag.ContinueOnError)
+	addr := fs.String("addr", envOr("LAMDIS_ADDR", ":8080"), "address to listen on")
+	baseURL := fs.String("base-url", envOr("LAMDIS_BASE_URL", ""),
+		"public origin reviewer links point at, e.g. https://exchange.lamdis.ai")
+	keyHex := fs.String("key", envOr("LAMDIS_EXCHANGE_KEY", ""),
+		"hex-encoded ed25519 seed for the exchange's principal")
+	seed := fs.Bool("seed-board", false,
+		"put sample work on the board, so the marketplace has something to show")
+	data := fs.String("data", envOr("LAMDIS_DATA", ""),
+		"directory for the ledger and accounts; empty keeps them in memory and loses them on restart")
+	novision := fs.Bool("no-vision", false,
+		"run without a vision model; submissions are stored and never become payable")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *baseURL == "" {
+		return fmt.Errorf("exchange: -base-url (or LAMDIS_BASE_URL) is required; " +
+			"reviewer links must point somewhere a phone can reach")
+	}
+
+	key, generated, err := loadOrMakeKey(*keyHex)
+	if err != nil {
+		return err
+	}
+
+	opt := exchange.Options{DataDir: *data}
+	if !*novision {
+		// Nil is a working configuration — evidence is stored and stays
+		// unpayable — so a missing model degrades the exchange rather than
+		// stopping it.
+		opt.Vision = vision.NewBedrock(
+			os.Getenv("AWS_PROFILE"),
+			envOr("AWS_REGION", "us-east-1"),
+			os.Getenv("LAMDIS_VISION_MODEL"))
+	}
+	// Video needs ffmpeg. Without it, video uploads are refused with a reason
+	// rather than silently accepted and never checked.
+	if ff := media.NewFFmpeg(); ff.Available() {
+		opt.Media = ff
+	}
+
+	srv, err := exchange.Open(key, *baseURL, opt)
+	if err != nil {
+		return err
+	}
+
+	if *seed {
+		if err := seedPanel(srv); err != nil {
+			return err
+		}
+		if err := seedBoard(srv); err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf("lamdis exchange\n")
+	fmt.Printf("  principal  %s\n", srv.PID)
+	fmt.Printf("  base url   %s\n", *baseURL)
+	fmt.Printf("  listening  %s\n", *addr)
+	// State the shape of the deployment, because every one of these being
+	// absent is a silent failure that looks like a working service.
+	fmt.Printf("  storage    %s\n", orMemory(*data))
+	fmt.Printf("  verifier   %s\n", yesNo(opt.Vision != nil, "vision model", "NONE — nothing can be paid"))
+	fmt.Printf("  video      %s\n", yesNo(opt.Media != nil, "ffmpeg", "unavailable — video will be refused"))
+	fmt.Printf("  accounts   %s\n", yesNo(srv.Workers.Cognito.Enabled(), "cognito", "NONE — nobody can sign in"))
+	fmt.Printf("  board      %s/board\n", *baseURL)
+	if generated {
+		// A generated key means every restart is a different exchange, and
+		// anything it signed before becomes unverifiable. Say so loudly.
+		fmt.Printf("\n  WARNING: no key supplied, so one was generated for this process.\n")
+		fmt.Printf("  Attestations signed now cannot be verified after a restart.\n")
+		fmt.Printf("  Set LAMDIS_EXCHANGE_KEY to a stable seed in any real deployment.\n\n")
+	}
+
+	// Nothing else in the service ever looks at a listing again once it stops
+	// being claimable, so without this an expired job holds its buyer's money
+	// forever.
+	sweepCtx, stopSweep := context.WithCancel(context.Background())
+	defer stopSweep()
+	srv.StartSweeper(sweepCtx, 5*time.Minute)
+	// Earned money should not wait on somebody remembering to press a button —
+	// least of all the person who is owed it. Hourly, because payouts are
+	// batched to a threshold anyway and a tighter loop only adds rail calls.
+	srv.StartPayoutSweeper(sweepCtx, time.Hour)
+	// Rebuild the payout mapping now rather than on somebody's first click.
+	srv.WarmPayoutAccounts(sweepCtx)
+	// Tell buyers when their work is going unfilled, while they can still act.
+	srv.StartAlerts(sweepCtx, 30*time.Minute)
+
+	server := &http.Server{
+		Addr:              *addr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	return server.ListenAndServe()
+}
+
+// loadOrMakeKey reads a stable seed, or generates an ephemeral one and reports
+// that it did.
+func loadOrMakeKey(seedHex string) (ed25519.PrivateKey, bool, error) {
+	if seedHex == "" {
+		_, priv, err := ed25519.GenerateKey(nil)
+		return priv, true, err
+	}
+	seed, err := hex.DecodeString(seedHex)
+	if err != nil {
+		return nil, false, fmt.Errorf("exchange key is not valid hex: %w", err)
+	}
+	if len(seed) != ed25519.SeedSize {
+		return nil, false, fmt.Errorf("exchange key must be %d bytes of hex, got %d",
+			ed25519.SeedSize, len(seed))
+	}
+	return ed25519.NewKeyFromSeed(seed), false, nil
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+var _ = protolog.GenesisPrev
+
+// seedBoard puts sample work on the marketplace.
+//
+// Only for looking at the thing. Real listings arrive over /v1/tasks and
+// /v1/panels from an authenticated principal, and nothing here is escrowed, so
+// none of it would actually pay.
+func seedBoard(srv *exchange.Server) error {
+	now := time.Now()
+
+	// Practice runs, not fake work.
+	//
+	// Seeded listings used to be indistinguishable from real ones, so somebody
+	// could claim one, drive to an address and find nothing there — which
+	// teaches them the board is fake and is a worse first experience than an
+	// empty board. These say what they are, pay nothing, and can be done from
+	// a kitchen table. Their job is to let an operator learn the flow — claim,
+	// photograph the code, submit, see the verdict — before any of it matters.
+	//
+	// Coordinates are Detroit, because a marketplace is a place before it is a
+	// product: ten jobs in one city is liquidity and ten across ten states is
+	// nothing.
+	const (
+		detroitLatE7 = 423314000 // Campus Martius, downtown
+		detroitLonE7 = -830458000
+	)
+	samples := []*api.Listing{
+		{
+			Job: "practice-1", Kind: api.KindTask,
+			Title:    "Practice: photograph anything with the code in frame",
+			Detail:   "A practice run. Nothing here is real work and nobody is paying for it.",
+			Practice: true,
+			Instructions: "Write the code you are given on a piece of paper, " +
+				"photograph it next to anything at all, and submit. You are " +
+				"learning where the buttons are.",
+			Deliverable: "One photo with the code legible.",
+			Area:        "Anywhere",
+			Tier:        "V1",
+			PayMinor:    0, Currency: "USD",
+			Slots: 50, Expires: now.Add(365 * 24 * time.Hour), Posted: now,
+		},
+		{
+			Job: "practice-2", Kind: api.KindDo,
+			Title:    "Practice: show something moved",
+			Detail:   "A practice run for a do-job, where the photograph has to show the work finished rather than just show you were there.",
+			Practice: true,
+			Instructions: "Move any object somewhere else and photograph it in " +
+				"its new place with the code in frame. This is the difference " +
+				"between proving you turned up and proving you did something.",
+			Deliverable: "One photo of the object in its new place, code legible.",
+			Area:        "Anywhere",
+			Tier:        "V1",
+			PayMinor:    0, Currency: "USD",
+			Slots: 50, Expires: now.Add(365 * 24 * time.Hour), Posted: now,
+		},
+	}
+
+	// Practice work is unpaid, so there is nothing to escrow and nothing to
+	// fund. The board refuses unfunded paid work, which is the check doing its
+	// job — these are exempt because they cost nothing.
+	ctx := context.Background()
+	for _, l := range samples {
+		if err := srv.Board.Post(l); err != nil {
+			return err
+		}
+	}
+	_ = ctx
+	_ = detroitLatE7
+	_ = detroitLonE7
+	return nil
+}
+
+// seedPanel gives the review surface something to show. Kept separate from the
+// board seed because it needs real escrow.
+func seedPanel(srv *exchange.Server) error {
+	now := time.Now()
+	ctx := context.Background()
+	const demoBuyer = "demo-buyer"
+	if _, err := srv.Ledger.Topup(ctx, "seed-topup", demoBuyer, 100000, "USD", "seed"); err != nil {
+		return err
+	}
+	_ = now
+	// A panel needs the artifact it is judging, or its page has nothing to
+	// show and every seat assigned to it looks like a broken link.
+	panelHold := int64((150 + 100) * 3)
+	if _, err := srv.Ledger.Hold(ctx, "seed-hold-panel", "panel-demo-1",
+		demoBuyer, panelHold, "USD"); err != nil {
+		return err
+	}
+	return srv.AddPanel(&api.ReviewPanel{
+		Job: "panel-demo-1", Parent: "practice-1",
+		Question:  "Does this photograph show a FOR LEASE sign at the address given?",
+		Context:   "Automated verification reached 73%, below the 90% the buyer asked for.",
+		Reviewers: 3, Agreement: 2,
+		FeeMinor: 150, BonusMinor: 100, Currency: "USD",
+		Expires: now.Add(2 * time.Hour),
+	}, samplePhoto(), "image/jpeg")
+}
+
+// samplePhoto draws something a reviewer can actually look at, so the demo
+// does not depend on a file being present.
+func samplePhoto() []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 480, 320))
+	for y := 0; y < 320; y++ {
+		for x := 0; x < 480; x++ {
+			switch {
+			case y < 120:
+				img.Set(x, y, color.RGBA{R: 120, G: 160, B: 210, A: 255}) // sky
+			case x > 150 && x < 330 && y > 150 && y < 230:
+				img.Set(x, y, color.RGBA{R: 200, G: 40, B: 40, A: 255}) // a red sign
+			default:
+				img.Set(x, y, color.RGBA{R: 90, G: 90, B: 95, A: 255})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, img, nil)
+	return buf.Bytes()
+}
+
+func orMemory(dir string) string {
+	if dir == "" {
+		return "in memory (LOST ON RESTART — set -data)"
+	}
+	return dir
+}
+
+func yesNo(ok bool, yes, no string) string {
+	if ok {
+		return yes
+	}
+	return no
+}

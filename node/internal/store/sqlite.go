@@ -353,8 +353,8 @@ func (s *SQLite) Search(ctx context.Context, req SearchRequest) ([]Hit, error) {
 		mode = ModeHybrid
 	}
 	type ranked struct {
-		hit  Hit
-		rrf  float64
+		hit Hit
+		rrf float64
 	}
 	merged := map[string]*ranked{}
 	addList := func(hits []Hit) {

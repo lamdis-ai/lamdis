@@ -66,9 +66,9 @@ type membershipBody struct {
 }
 
 type delegationBody struct {
-	Agent      string `json:"agent"`
-	ExpiresAt  string `json:"expires_at,omitempty"`
-	Revoked    bool   `json:"revoked,omitempty"`
+	Agent     string `json:"agent"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+	Revoked   bool   `json:"revoked,omitempty"`
 }
 
 // AccessRequest is a pending, unanswered core.access_request.

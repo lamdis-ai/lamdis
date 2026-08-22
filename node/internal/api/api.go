@@ -157,6 +157,12 @@ func FetchNodeInfo(ctx context.Context, baseURL string) (string, error) {
 	return out.Principal, nil
 }
 
+// WithAuth is the exported form, so other packages can mount routes behind the
+// same Ed25519 request-signature check rather than inventing their own.
+func (s *Server) WithAuth(next func(w http.ResponseWriter, r *http.Request, principal string, body []byte)) http.HandlerFunc {
+	return s.withAuth(next)
+}
+
 func (s *Server) withAuth(next func(w http.ResponseWriter, r *http.Request, principal string, body []byte)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
@@ -293,4 +299,14 @@ func (t *HTTPTransport) Push(ctx context.Context, req syncp.PushRequest) (*syncp
 		return nil, err
 	}
 	return &out, nil
+}
+
+// AuthenticatePrincipal verifies a request signed by a principal's own key.
+//
+// Exported because the exchange's buy-side routes need the same answer the
+// node's own routes get: an integration holding a keypair is an account, and
+// the routes that describe how it spends must accept what the route that
+// spends already accepts.
+func AuthenticatePrincipal(r *http.Request, body []byte, now time.Time) (string, error) {
+	return authenticate(r, body, now)
 }

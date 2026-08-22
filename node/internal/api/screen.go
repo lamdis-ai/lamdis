@@ -1,0 +1,159 @@
+package api
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+// Work this exchange will not carry.
+//
+// Written after reading what happened to the first marketplace of this shape.
+// Researchers cataloguing rentahuman.ai found six abuse classes being bought
+// openly: fake accounts on third-party services at $12-15 each, people paid
+// $60/hour to impersonate professionals in job interviews, one-time passcodes
+// solicited from workers, engagement farming across hundreds of accounts,
+// referral fraud with real KYC, and reconnaissance dispatched by closed-loop
+// pipelines with no human in them. A bounty asking for help defeating
+// two-factor authentication drew 79 applicants.
+//
+// The workers were not the problem. Most had no idea what they were part of:
+// creating an account for somebody is a five-minute errand until it turns out
+// to be a money-mule pipeline, and the person who did it is the one whose name
+// is on it. An exchange that dispatches physical acts without asking what they
+// are for is a laundering service with a job board attached.
+//
+// The published analysis found seven keyword rules caught 51 of 52 abusive
+// listings with a 0.3% false-positive rate. That is the cheapest safety
+// mechanism available here and it did not exist.
+
+// Refusal explains why a job cannot be listed.
+type Refusal struct {
+	// Class is the abuse pattern matched, for the record and for review.
+	Class string
+	// Why is what the buyer's agent is told.
+	Why string
+	// Review is true when the job is held for a person to look at rather than
+	// refused outright: some of these have honest readings.
+	Review bool
+}
+
+func (r Refusal) Error() string { return r.Why }
+
+type screenRule struct {
+	class   string
+	pattern *regexp.Regexp
+	why     string
+	review  bool
+}
+
+// The rules. Deliberately few and deliberately blunt.
+//
+// Each one names a class of harm rather than a keyword, because a list of
+// banned words is a list somebody edits around. Where an honest reading exists
+// the rule holds the job for review instead of refusing it — a locksmith
+// opening a door and a burglar opening a door describe themselves the same
+// way, and the difference is a licence, not a phrase.
+var screenRules = []screenRule{
+	{
+		class:   "account-creation",
+		pattern: regexp.MustCompile(`(?i)\b(create|open|register|sign[ -]?up for|set[ -]?up)\b[^.]{0,40}\b(account|profile|wallet)\b`),
+		why: "this exchange does not carry work that involves opening accounts " +
+			"in somebody else's name or on somebody else's behalf. That is how " +
+			"money-mule and identity pipelines are staffed, and the person who " +
+			"opens the account is the one who carries it.",
+	},
+	{
+		class:   "one-time-code",
+		pattern: regexp.MustCompile(`(?i)\b(otp|one[- ]time (code|password|passcode)|2fa|two[- ]factor|verification code|sms code|auth code)\b`),
+		why: "this exchange does not carry work involving one-time codes or " +
+			"two-factor authentication. There is no honest version of asking a " +
+			"stranger to read you a passcode.",
+	},
+	{
+		class:   "impersonation",
+		pattern: regexp.MustCompile(`(?i)\b(pretend to be|impersonat|pose as|act as (?:me|my|an? (?:employee|manager|engineer))|on my behalf in (?:an? )?(?:interview|call))\b`),
+		why: "this exchange does not carry work that involves representing " +
+			"yourself as somebody else. Interview and identity impersonation is " +
+			"the single best-paid abuse on marketplaces of this kind.",
+	},
+	{
+		class:   "engagement-farming",
+		pattern: regexp.MustCompile(`(?i)\b(follow|like|upvote|retweet|review|comment on|subscribe to)\b[^.]{0,30}\b(account|post|profile|page|listing|video|product)\b`),
+		why: "this exchange does not carry paid engagement, reviews or " +
+			"followers. Buying authentic-looking human activity is exactly what " +
+			"platform bot-detection cannot see, which is why it is bought.",
+	},
+	{
+		class:   "referral-kyc",
+		pattern: regexp.MustCompile(`(?i)\b(referral (link|code|bonus)|refer a friend|use my (?:code|link))\b`),
+		why: "this exchange does not carry referral or signup-bonus work. It " +
+			"pairs with identity verification to turn real people into farmed " +
+			"accounts.",
+	},
+	{
+		class:   "credential-sharing",
+		pattern: regexp.MustCompile(`(?i)\b(my (?:password|login|credentials)|log ?in (?:as|with) (?:my|these)|share (?:your|the) (?:password|credentials))\b`),
+		why: "this exchange does not carry work that passes login credentials " +
+			"between people, in either direction.",
+	},
+	{
+		class:   "off-platform",
+		pattern: regexp.MustCompile(`(?i)\b(whats ?app|telegram|signal me|dm me|text me at|email me at|discord|pay(?:ment)? outside|off[- ]platform)\b`),
+		why: "arrangements moved off the exchange lose the escrow, the evidence " +
+			"and the record — which is usually the point of moving them. Keep " +
+			"contact and payment here.",
+		review: true,
+	},
+}
+
+// Screen inspects everything a buyer wrote for work this exchange refuses.
+//
+// Applied to the whole of it: predicate, detail and instructions together,
+// because the interesting part is rarely in the title.
+func Screen(parts ...string) *Refusal {
+	text := strings.Join(parts, "\n")
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	for _, r := range screenRules {
+		if r.pattern.MatchString(text) {
+			return &Refusal{Class: r.class, Why: r.why, Review: r.review}
+		}
+	}
+	return nil
+}
+
+// ScreenAll returns every class a job matches, for the audit record. Screen
+// stops at the first because the buyer only needs one reason.
+func ScreenAll(parts ...string) []string {
+	text := strings.Join(parts, "\n")
+	var out []string
+	for _, r := range screenRules {
+		if r.pattern.MatchString(text) {
+			out = append(out, r.class)
+		}
+	}
+	return out
+}
+
+// MassLowValue flags the shape the researchers found under the abusive
+// listings: many people wanted, very little paid to each.
+//
+// Not a phrase, so no wording avoids it. Honest work at this shape exists —
+// leafleting, queueing — so it is held for review rather than refused.
+func MassLowValue(slots int, payMinor int64) *Refusal {
+	const manySlots = 20
+	const lowPay = 300
+	if slots >= manySlots && payMinor > 0 && payMinor <= lowPay {
+		return &Refusal{
+			Class:  "mass-low-value",
+			Review: true,
+			Why: fmt.Sprintf(
+				"%d people at %d minor units each is the shape engagement "+
+					"farming takes. A person will look at this before it lists.",
+				slots, payMinor),
+		}
+	}
+	return nil
+}

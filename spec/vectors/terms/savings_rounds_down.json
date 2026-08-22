@@ -1,0 +1,82 @@
+{
+  "name": "savings_rounds_down",
+  "terms": {
+    "v": 0,
+    "currency": "USD",
+    "scale": 2,
+    "verifier": "ed25519:HA4E7QBM17RSBZAJVCPKSEJXEB56E2DZ3PA146ZKEJ403D0FDXE0",
+    "arbiter": "ed25519:G4WQE3N8FMBNYNN3AHKC6K3YSK5RV2MHPKQ3F8JXYR7NQ3Y9PEA0",
+    "escrow_agent": "ed25519:XN4JHHH8T71CDTQ90CW90PCNC4MNJ9STBHHZJDHPR5319B476Z8G",
+    "timekeeper": "ed25519:SA9TR5R531R73NKVGF3ZY3QYG44EHV2561BNTXS6GY9K7PYTQSY0",
+    "measures": [
+      {
+        "id": "realized_savings",
+        "kind": "money",
+        "min": 0,
+        "max": 10000000,
+        "definition": "Invoice total before minus after, same billing period.",
+        "required": true
+      }
+    ],
+    "criteria": [
+      {
+        "id": "c_threshold",
+        "measure": "realized_savings",
+        "op": "gte",
+        "value": 5000
+      }
+    ],
+    "payout": {
+      "clauses": [
+        {
+          "when": "c_threshold",
+          "pay": [
+            {
+              "op": "pct_of",
+              "measure": "realized_savings",
+              "bp": 2000,
+              "round": "down"
+            }
+          ]
+        },
+        {
+          "pay": [
+            {
+              "op": "fixed"
+            }
+          ]
+        }
+      ]
+    },
+    "fee": {
+      "bp": 0
+    },
+    "deadlines": [
+      {
+        "id": "evidence_deadline",
+        "after": "award",
+        "seconds": 172800
+      },
+      {
+        "id": "dispute_window",
+        "after": "verdict",
+        "seconds": 86400
+      }
+    ],
+    "on_verification_timeout": "fail",
+    "on_arbitration_timeout": "refund"
+  },
+  "measures": {
+    "realized_savings": 5009
+  },
+  "escrow_minor": 2000000,
+  "expect": {
+    "escrow_minor": 2000000,
+    "gross_minor": 1001,
+    "fee_minor": 0,
+    "provider_net": 1001,
+    "refund_minor": 1998999,
+    "clause_index": 0,
+    "criteria": null
+  }
+}

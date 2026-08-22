@@ -95,6 +95,13 @@ var (
 	sigRe  = regexp.MustCompile(`^[0-9a-f]{128}$`)
 )
 
+// CanonicalJSON returns the protocol's deterministic encoding of a JSON
+// object. Anything outside this package that hashes or signs protocol data —
+// contract terms, attestations — must use this, not encoding/json, so that
+// those artifacts commit to bytes identical to the ones entry signatures
+// cover.
+func CanonicalJSON(raw json.RawMessage) ([]byte, error) { return canonicalBody(raw) }
+
 // canonicalBody re-encodes arbitrary JSON deterministically: object keys
 // sorted, number literals preserved verbatim, no HTML escaping.
 func canonicalBody(raw json.RawMessage) ([]byte, error) {

@@ -1,0 +1,282 @@
+package api
+
+// themeCSS is the exchange's design system, in one place.
+//
+// Every page includes it, so the palette and type scale exist once rather than
+// being copied into four templates that then drift. The rules below are the
+// ones worth stating:
+//
+// Colour carries exactly three meanings. Gold is money. Green is healthy or
+// done. Amber is blocked or degraded. Nothing else borrows them, which is what
+// makes a screen readable at a glance instead of decorative.
+//
+// Display type is a geometric sans set tight and heavy; monospace is reserved
+// for anything a machine produced — codes, amounts, coordinates, identifiers.
+// The split is meaningful rather than aesthetic: if it is mono, a computer
+// wrote it.
+const themeCSS = `
+:root {
+  --bg:      #070A0E;
+  --rail:    #090D12;
+  --panel:   #0D1218;
+  --panel-2: #121A22;
+  --ink:     #EDF1F5;
+  --ink-2:   #93A4B3;
+  --ink-3:   #5D6E7C;
+  --rule:    #1B242E;
+  --rule-2:  #2B3945;
+  --gold:    #FFB627;
+  --green:   #3FCF71;
+  --warn:    #E8873D;
+  --warn-bg: #180F08;
+  --bad:     #E06C6C;
+
+  --sans: system-ui, -apple-system, "Segoe UI Variable", "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+/* A class that sets display beats the hidden attribute, so anything marked
+   hidden stays on screen. This has to win. */
+[hidden] { display: none !important; }
+/* A licensed skill reads differently from a preference: claiming one is a
+   statement about credentials, not about taste. */
+.kind.lic[aria-pressed=true] { border-color: var(--gold); }
+.kind.lic::after { content: " \00b7 licensed"; opacity: .5; font-size: .78em; }
+.sw2 { background: none; border: 1px solid var(--rule-2); color: var(--ink);
+  border-radius: 6px; padding: .3rem .7rem; font: inherit; font-size: .82rem;
+  cursor: pointer; }
+.sw2:hover { border-color: var(--gold); }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 15px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+button, input, textarea { font: inherit; }
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.label {
+  font: 600 .62rem/1 var(--mono);
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* --- top bar -------------------------------------------------------------- */
+
+.top {
+  display: flex; align-items: center; gap: 1rem;
+  height: 3.1rem; padding: 0 1rem;
+  border-bottom: 1px solid var(--rule); background: var(--rail);
+  position: sticky; top: 0; z-index: 30;
+}
+.mark { font: 700 .95rem/1 var(--sans); letter-spacing: -.03em; text-decoration: none; }
+.mark b { color: var(--gold); }
+.top .right { margin-left: auto; display: flex; align-items: center; gap: 1rem; }
+.top .right a { font-size: .84rem; color: var(--ink-2); text-decoration: none; }
+.top .right a:hover { color: var(--ink); }
+.health { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--ink-2); }
+.beacon {
+  width: .42rem; height: .42rem; border-radius: 50%; background: var(--green);
+  box-shadow: 0 0 0 0 rgba(63,207,113,.5); animation: ping 2.4s infinite;
+}
+.beacon.off { background: var(--ink-3); animation: none; }
+@keyframes ping {
+  70%  { box-shadow: 0 0 0 .3rem rgba(63,207,113,0); }
+  100% { box-shadow: 0 0 0 0 rgba(63,207,113,0); }
+}
+
+/* --- shell ---------------------------------------------------------------- */
+
+.shell { display: grid; grid-template-columns: 1fr; min-height: calc(100vh - 3.1rem); }
+@media (min-width: 56rem) { .shell { grid-template-columns: 13.5rem 1fr; } }
+
+.rail {
+  border-right: 1px solid var(--rule); background: var(--rail);
+  padding: 1rem .6rem; display: flex; flex-direction: column; gap: .1rem;
+}
+@media (max-width: 56rem) {
+  .rail {
+    flex-direction: row; overflow-x: auto;
+    border-right: 0; border-bottom: 1px solid var(--rule);
+  }
+  .rail .grp { display: none; }
+}
+.rail .grp { padding: .9rem .65rem .4rem; }
+.rail a {
+  display: flex; align-items: center; gap: .55rem; width: 100%;
+  padding: .5rem .65rem; border-radius: 3px;
+  color: var(--ink-2); text-decoration: none; white-space: nowrap; font-size: .88rem;
+}
+.rail a:hover { background: var(--panel); color: var(--ink); }
+.rail a[aria-current="page"] { background: var(--panel-2); color: var(--ink); }
+.rail a:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.rail .n {
+  margin-left: auto; padding: .1rem .34rem; border-radius: 2px;
+  background: var(--rule-2); color: var(--ink-2); font: 600 .66rem/1.5 var(--mono);
+}
+.rail .n.hot { background: #4A3410; color: var(--gold); }
+
+.main { padding: 1.4rem 1.25rem 4rem; min-width: 0; }
+@media (min-width: 56rem) { .main { padding: 1.6rem 2rem 4rem; } }
+
+h1 { margin: 0 0 .3rem; font: 700 1.45rem/1.15 var(--sans); letter-spacing: -.03em; }
+.lead { margin: 0 0 1.4rem; color: var(--ink-2); font-size: .92rem; }
+h2 {
+  margin: 1.8rem 0 .7rem; font: 600 .64rem/1 var(--mono);
+  letter-spacing: .15em; text-transform: uppercase; color: var(--ink-3);
+}
+
+/* --- status strip --------------------------------------------------------- */
+
+.strip {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  padding: .65rem .85rem; margin-bottom: 1.3rem; border-radius: 3px;
+  border: 1px solid var(--rule-2); background: var(--panel);
+  font-size: .87rem; color: var(--ink-2);
+}
+.strip b { color: var(--ink); }
+.strip a { color: var(--gold); }
+.strip .d { width: .42rem; height: .42rem; border-radius: 50%; background: var(--green); flex: none; }
+.strip.warn { border-color: #3A2510; background: var(--warn-bg); color: #E7D7C4; }
+.strip.warn .d { background: var(--warn); }
+
+/* --- metrics -------------------------------------------------------------- */
+
+.metrics {
+  display: grid; gap: 1px; background: var(--rule);
+  border: 1px solid var(--rule); border-radius: 3px; overflow: hidden;
+  margin-bottom: 1.5rem; grid-template-columns: repeat(2, 1fr);
+}
+@media (min-width: 46rem) { .metrics { grid-template-columns: repeat(4, 1fr); } }
+.metric { background: var(--bg); padding: .9rem .95rem; }
+.metric dt {
+  font: 600 .6rem/1 var(--mono); letter-spacing: .13em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.metric dd {
+  margin: .45rem 0 0; font: 700 1.35rem/1 var(--sans);
+  letter-spacing: -.03em; font-variant-numeric: tabular-nums;
+}
+.metric dd small { font: 500 .72rem/1 var(--mono); color: var(--ink-3); margin-left: .2rem; }
+.metric.money dd { color: var(--gold); }
+.metric .trend { margin-top: .35rem; font: 500 .7rem/1 var(--mono); color: var(--ink-3); }
+
+/* --- rows ----------------------------------------------------------------- */
+
+.rows { border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+.r {
+  display: flex; align-items: center; gap: .9rem;
+  padding: .8rem .95rem; background: var(--bg); border-bottom: 1px solid var(--rule);
+}
+.r:last-child { border-bottom: 0; }
+.r:hover { background: var(--panel); }
+.r .grow { min-width: 0; flex: 1; }
+.r .t { font-size: .93rem; }
+.r .m { margin-top: .22rem; font: 400 .78rem/1.35 var(--mono); color: var(--ink-3); }
+.r .amt {
+  flex: none; font: 600 .95rem/1 var(--mono);
+  color: var(--gold); font-variant-numeric: tabular-nums;
+}
+.r .amt.none { color: var(--ink-3); }
+.r .when {
+  flex: none; font: 500 .76rem/1 var(--mono);
+  color: var(--ink-3); width: 4rem; text-align: right;
+}
+
+.chip {
+  display: inline-block; margin-right: .45rem; padding: .16rem .4rem;
+  border-radius: 2px; border: 1px solid var(--rule-2);
+  font: 600 .58rem/1 var(--mono); letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-3); vertical-align: .07em;
+}
+.chip.ok   { color: var(--green); border-color: #1C4530; }
+.chip.hot  { color: var(--gold);  border-color: #4A3410; }
+.chip.bad  { color: var(--bad);   border-color: #43201F; }
+.chip.warn { color: var(--warn);  border-color: #3A2510; }
+
+/* --- controls ------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 2.25rem; padding: 0 .9rem; border-radius: 3px; cursor: pointer;
+  border: 1px solid var(--rule-2); background: none; color: var(--ink);
+  font-size: .85rem; font-weight: 500; text-decoration: none; white-space: nowrap;
+  transition: background .14s, border-color .14s;
+}
+.btn:hover:not(:disabled) { border-color: var(--ink-3); background: var(--panel); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.btn.go { background: var(--gold); border-color: var(--gold); color: #120C00; font-weight: 600; }
+.btn.go:hover:not(:disabled) { background: #FFC24D; border-color: #FFC24D; }
+.btn.sm { height: 1.95rem; padding: 0 .7rem; font-size: .8rem; }
+.btn.wide { width: 100%; }
+
+input[type="text"], input[type="email"], textarea {
+  width: 100%; padding: .6rem .75rem;
+  border: 1px solid var(--rule-2); border-radius: 3px;
+  background: var(--panel); color: var(--ink); font-size: .92rem;
+}
+input::placeholder, textarea::placeholder { color: var(--ink-3); }
+input:focus, textarea:focus { outline: none; border-color: var(--gold); }
+
+.err { margin-top: .5rem; min-height: 1.1rem; font-size: .84rem; color: var(--bad); }
+.err.ok { color: var(--green); }
+.empty { padding: 2.5rem 1rem; text-align: center; color: var(--ink-3); font-size: .9rem; }
+.note { margin: 1rem 0 0; font-size: .84rem; color: var(--ink-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+`
+
+// shellTop renders the masthead and left rail.
+//
+// Taking it as a function rather than a constant keeps the current page
+// highlighted without every template hand-writing the same nav and getting the
+// aria-current wrong.
+func shellTop(current, status string) string {
+	nav := func(href, label, id string) string {
+		cur := ""
+		if id == current {
+			cur = ` aria-current="page"`
+		}
+		return `<a href="` + href + `"` + cur + `>` + label + `</a>`
+	}
+	beacon := `<span class="beacon"></span>`
+	if status == "" {
+		beacon = `<span class="beacon off"></span>`
+		status = "Not signed in"
+	}
+	return `<header class="top">
+  <a class="mark" href="/board">lamdis<b>.</b></a>
+  <div class="right">
+    <span class="health">` + beacon + `<span id="h-text">` + status + `</span></span>
+  </div>
+</header>
+<div class="shell">
+  <nav class="rail">
+    <span class="label grp">Work</span>
+    ` + nav("/board", `Queue <span class="n hot" id="n-queue"></span>`, "queue") + `
+    ` + nav("/board#holding", `In flight <span class="n" id="n-flight"></span>`, "flight") + `
+    <span class="label grp">Operation</span>
+    ` + nav("/console", "Earnings", "earnings") + `
+    ` + nav("/console#standing", "Capacity", "capacity") + `
+    <span class="label grp">About</span>
+    ` + nav("/how-it-works", "How this works", "trust") + `
+    ` + nav("/docs", "API", "docs") + `
+  </nav>
+  <main class="main">`
+}
+
+const shellBottom = `  </main>
+</div>`

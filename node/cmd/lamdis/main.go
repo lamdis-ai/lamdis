@@ -48,6 +48,30 @@ commands:
   read <thread>               print a thread's entries (all lanes)
   search <query>              hybrid search across all local threads
 
+  exchange -base-url URL      run the exchange as a service: reviewer surface,
+       [-addr :8080]          panel creation, health. Reads LAMDIS_BASE_URL,
+                              LAMDIS_ADDR, LAMDIS_EXCHANGE_KEY from the env.
+
+  review -image FILE          serve a human-review panel: prints one link per
+      -question "..."         reviewer, shows the photo on their phone, and
+      [-reviewers 3]          settles the panel when enough have answered.
+      [-agreement 2]          No model calls, no AWS.
+
+  buy -predicate "..."        run the whole outcome lifecycle against a real
+      -image FILE             photograph: quote, escrow, submit, verify with a
+      [-tier V1] [-lat/-lon]  real model, settle. Calls Bedrock; a few cents.
+
+  verify-photo -image FILE    run the real verification pipeline over one
+       [-predicate "..."]     image: deterministic checks, a blind model
+       [-nonce CODE]          description, the challenge-code comparison, then
+       [-profile aws-admin]   adjudication. Calls Bedrock; costs a few cents.
+
+  demo [-seed 42] [-json]     buy an outcome end to end against simulated
+                              providers: quote, escrow, execute, verify,
+                              settle. Runs an honest provider and a
+                              fraudulent one; exits non-zero if any
+                              invariant fails.
+
   mcp                         serve MCP over stdio (add to your agent's .mcp.json)
   serve [-addr :8420]         serve sync to peers (run this; give peers your URL)
   peer add <name> <url>       pair with a person's node (exchanges identities)
@@ -99,6 +123,27 @@ func run(args []string) error {
 	switch cmd {
 	case "init":
 		return cmdInit(*dataDir)
+	case "demo":
+		// Self-contained: no store, no keys, no network.
+		return cmdDemo(rest)
+	case "exchange":
+		// Run the exchange as a service.
+		return cmdServeExchange(rest)
+	case "review":
+		// Serve a human-review panel and wait for people to answer it.
+		return cmdReview(rest)
+	case "gauntlet":
+		// A sequence of jobs where later ones try to reuse earlier evidence.
+		return cmdGauntlet(rest)
+	case "wallet":
+		// Balances, keys and payout thresholds, against a real ledger.
+		return cmdWallet(rest)
+	case "buy":
+		// The whole lifecycle against a real photograph.
+		return cmdBuy(rest)
+	case "verify-photo":
+		// Real image, real model call. Needs AWS credentials, not the store.
+		return cmdVerifyPhoto(rest)
 	case "whoami":
 		_, pid, err := loadKey(*dataDir)
 		if err != nil {

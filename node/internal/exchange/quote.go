@@ -1,0 +1,255 @@
+package exchange
+
+import (
+	"encoding/json"
+	"net/http"
+	"sort"
+	"time"
+
+	"github.com/lamdis-ai/lamdis-protocol/node/internal/account"
+	"github.com/lamdis-ai/lamdis-protocol/node/internal/api"
+)
+
+// Asking before committing.
+//
+// There was no way to learn what work would cost, or whether anybody within
+// range could do it, without posting the job and escrowing the money. So an
+// agent's only instrument for finding out was spending its person's funds: it
+// posted into a void and discovered by waiting.
+//
+// That is survivable for a twelve dollar errand and hopeless for the thing
+// this exchange is supposed to be for. Somebody who says "do something with
+// the front yard, under six thousand" needs their agent to work out what is
+// possible before any of the six thousand moves, and an agent cannot plan
+// against an exchange that only answers questions in money.
+//
+// A quote answers three things and holds nothing: is there anybody, what has
+// work like this cost, and would you refuse it.
+
+// QuoteRequest is a job an agent is considering.
+type QuoteRequest struct {
+	Kind   string      `json:"kind"`
+	Skills []api.Skill `json:"skills,omitempty"`
+	Lat    float64     `json:"lat,omitempty"`
+	Lon    float64     `json:"lon,omitempty"`
+	Slots  int         `json:"slots,omitempty"`
+	Tier   string      `json:"tier,omitempty"`
+	// The words, so screening can answer before anything is posted rather than
+	// refusing a job the agent has already told somebody it placed.
+	Predicate    string `json:"predicate,omitempty"`
+	Detail       string `json:"detail,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
+// Quote is what the exchange can say without being paid.
+type Quote struct {
+	// Reachable buckets how many operators could take this. Bucketed rather
+	// than exact: a precise count of who is where, queryable for free, is a
+	// map of this marketplace's supply for anyone who wants to compete with it
+	// or target the people in it.
+	Reachable string `json:"reachable"`
+	// Feasible is false when nobody at all could take the work as described.
+	Feasible bool   `json:"feasible"`
+	Why      string `json:"why,omitempty"`
+
+	// Settled is what work of this shape has actually been paid here, when
+	// enough of it has. Not an estimate and not advice: this exchange has no
+	// idea what a driveway costs, and the number varies by yard, by region, by
+	// season and by what is under the old surface. It is history, offered as
+	// history, and absent when there is too little of it to mean anything.
+	//
+	// The bidding round is the price discovery mechanism. This is context for
+	// setting a ceiling, not a substitute for asking.
+	Settled *PriceBand `json:"settled_here,omitempty"`
+
+	// Refused reports that this job would not be listed, and why — answered
+	// now rather than after the agent has committed to a plan around it.
+	Refused     bool   `json:"refused,omitempty"`
+	RefusedWhy  string `json:"refused_why,omitempty"`
+	NeedsReview bool   `json:"needs_review,omitempty"`
+
+	// Advice is what would make the job more likely to be taken.
+	Advice []string `json:"advice,omitempty"`
+}
+
+// PriceBand is what similar work has actually been paid here.
+//
+// Deliberately not called an estimate. The exchange publishes what it has seen
+// and nothing more: a figure invented with authority is worse than no figure,
+// and the sealed-bid round exists precisely because the people doing the work
+// are the ones who know.
+type PriceBand struct {
+	LowMinor    int64  `json:"low_minor"`
+	MedianMinor int64  `json:"median_minor"`
+	HighMinor   int64  `json:"high_minor"`
+	Currency    string `json:"currency"`
+	BasedOn     int    `json:"based_on"`
+}
+
+func (s *Server) registerQuote(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/quote", s.withBuyer(s.handleQuote))
+}
+
+func (s *Server) handleQuote(w http.ResponseWriter, r *http.Request, key *account.Key, person string, body []byte) {
+	var in QuoteRequest
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed request")
+		return
+	}
+	if in.Kind == "" {
+		in.Kind = api.KindDo
+	}
+	if in.Slots < 1 {
+		in.Slots = 1
+	}
+	q := Quote{}
+
+	// Would we even carry it. Cheapest question, asked first.
+	if ref := api.Screen(in.Predicate, in.Detail, in.Instructions); ref != nil {
+		q.Refused, q.RefusedWhy, q.NeedsReview = true, ref.Why, ref.Review
+	}
+
+	// Who could take it.
+	reach, advice := s.reachFor(in)
+	q.Reachable = bucket(reach)
+	q.Feasible = reach > 0 && !q.Refused
+	q.Advice = advice
+	if reach == 0 {
+		q.Why = "nobody within range is set up for this work right now. That is " +
+			"not permanent — operators change what they take — but posting it " +
+			"today would most likely sit unclaimed."
+	}
+
+	// What it has cost before.
+	if band := s.priceBandFor(in); band != nil {
+		q.Settled = band
+	} else {
+		q.Advice = append(q.Advice,
+			"no history for work of this shape here yet, so there is no price to "+
+				"quote. Post it for bids with a ceiling you are willing to pay — "+
+				"the people who do the work know what it costs and this exchange "+
+				"does not.")
+	}
+	writeJSONResponse(w, q)
+}
+
+// reachFor counts operators who could take this, and says what is narrowing it.
+func (s *Server) reachFor(in QuoteRequest) (int, []string) {
+	if s.Capacities == nil {
+		return 0, nil
+	}
+	var reach, blockedBySkill, blockedByRange, notAccepting int
+	for worker, cap := range s.Capacities.All() {
+		if !cap.Accepting {
+			notAccepting++
+			continue
+		}
+		if !cap.Takes(in.Kind) {
+			continue
+		}
+		if !api.MeetsSkills(in.Skills, cap.Skills) {
+			blockedBySkill++
+			continue
+		}
+		if api.HasPosition(api.E7(in.Lat), api.E7(in.Lon)) && cap.Positioned() &&
+			!api.InRange(api.E7(in.Lat), api.E7(in.Lon), cap.LatE7, cap.LonE7, cap.RangeMiles) {
+			blockedByRange++
+			continue
+		}
+		// A licensed trade needs a licence somebody checked, so somebody who
+		// merely ticked the box is not reachable supply.
+		if s.Suppliers != nil {
+			unlicensed := false
+			for _, sk := range in.Skills {
+				if api.Licensed(sk) && !s.Suppliers.HoldsLicence(worker, sk, s.now()) {
+					unlicensed = true
+					break
+				}
+			}
+			if unlicensed {
+				blockedBySkill++
+				continue
+			}
+		}
+		reach++
+	}
+
+	// Say what is narrowing it, so the agent can change the plan rather than
+	// guess at why nothing happened.
+	var advice []string
+	if blockedByRange > 0 && reach == 0 {
+		advice = append(advice,
+			"operators exist for this work but none within travelling distance; "+
+				"paying more or allowing longer may widen it")
+	}
+	if blockedBySkill > 0 && reach == 0 {
+		advice = append(advice,
+			"the qualifications asked for are the binding constraint here")
+	}
+	if notAccepting > 0 && reach == 0 {
+		advice = append(advice,
+			"some operators who could do this have paused taking work")
+	}
+	return reach, advice
+}
+
+// bucket reports supply coarsely.
+//
+// Exact counts would let anybody map this marketplace's supply for free, which
+// is useful to a competitor and to somebody deciding where a sybil fleet would
+// go unnoticed. An agent planning a job needs to know whether the answer is
+// none, few or plenty; it does not need the number.
+func bucket(n int) string {
+	switch {
+	case n == 0:
+		return "none"
+	case n < 3:
+		return "a few"
+	case n < 10:
+		return "several"
+	default:
+		return "plenty"
+	}
+}
+
+// priceBandFor is what comparable work has actually settled at.
+//
+// Built from settled jobs rather than from listed prices: what a buyer hoped
+// to pay is not evidence of what the work costs. Absent when there is too
+// little history, because a median of two is a number that misleads with more
+// authority than no number at all.
+func (s *Server) priceBandFor(in QuoteRequest) *PriceBand {
+	const enough = 5
+	var paid []int64
+	currency := "USD"
+	for _, l := range s.Board.All() {
+		if l.Kind != in.Kind {
+			continue
+		}
+		if !api.MeetsSkills(in.Skills, l.Skills) && !api.MeetsSkills(l.Skills, in.Skills) {
+			continue
+		}
+		for _, sub := range s.Submissions(l.Job) {
+			if !sub.Verified || !sub.Finding {
+				continue
+			}
+			if got := earnedFor(l, sub); got > 0 {
+				paid = append(paid, got)
+				currency = l.Currency
+			}
+		}
+	}
+	if len(paid) < enough {
+		return nil
+	}
+	sort.Slice(paid, func(i, j int) bool { return paid[i] < paid[j] })
+	return &PriceBand{
+		LowMinor:    paid[len(paid)/10],
+		MedianMinor: paid[len(paid)/2],
+		HighMinor:   paid[len(paid)*9/10],
+		Currency:    currency,
+		BasedOn:     len(paid),
+	}
+}
+
+var _ = time.Now
