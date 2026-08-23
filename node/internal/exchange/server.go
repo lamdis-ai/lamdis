@@ -428,6 +428,7 @@ func (s *Server) Handler() *http.ServeMux {
 		s.registerReview(mux)
 		s.registerQuote(mux)
 		s.registerProjects(mux)
+		s.registerScopeBuyer(mux)
 		s.registerBook(mux)
 		mux.HandleFunc("GET /v1/jobs/{job}/evidence", s.withAgent(s.handleJobEvidence))
 		mux.HandleFunc("GET /v1/jobs/{job}/evidence/{sha}", s.withAgent(s.handleEvidenceFile))
@@ -1241,6 +1242,12 @@ type CreateTaskRequest struct {
 	// Report asks for a structured answer instead of, or alongside, photographs.
 	Report []api.ReportField `json:"report,omitempty"`
 
+	// Multi-part work. See internal/api/scope.go for why a scope's shape has
+	// to reach the supply side rather than living only in the agent's plan.
+	DependsOn []string `json:"depends_on,omitempty"`
+	BidsAsOne bool     `json:"bids_as_one,omitempty"`
+	PlanBy    string   `json:"plan_by,omitempty"`
+
 	Currency   string `json:"currency,omitempty"`
 	Slots      int    `json:"slots,omitempty"`
 	Tier       string `json:"tier,omitempty"`
@@ -1307,10 +1314,45 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request, princi
 		ProjectID: in.ProjectID,
 		SiteID:    in.SiteID,
 		Reference: in.Reference,
+		DependsOn: in.DependsOn,
+		BidsAsOne: in.BidsAsOne,
+		PlanBy:    in.PlanBy,
 		// Recorded from the credential that posted it, so the claim is the
 		// exchange's rather than the buyer's.
 		PostedByAgent: postedByAgent,
 		Expires:       s.now().Add(ttl), Posted: s.now(),
+	}
+	// Multi-part terms, checked before any money moves.
+	//
+	// A dependency on a job outside this project would silently never resolve,
+	// leaving a listing nobody can ever claim; and both of these only mean
+	// anything inside a project, so asking for them without one is a mistake
+	// worth naming rather than ignoring.
+	if in.PlanBy != "" && in.PlanBy != api.PlanByBuyer && in.PlanBy != api.PlanBySupplier {
+		writeError(w, http.StatusBadRequest,
+			`plan_by must be "buyer" or "supplier"`)
+		return
+	}
+	if in.PlanBy == api.PlanBySupplier && len(in.Stages) > 0 {
+		writeError(w, http.StatusBadRequest,
+			"a job whose supplier writes the stages cannot be posted with stages already on it")
+		return
+	}
+	if (len(in.DependsOn) > 0 || in.BidsAsOne) && in.ProjectID == "" {
+		writeError(w, http.StatusBadRequest,
+			"depends_on and bids_as_one describe a job's place in a project; open one first")
+		return
+	}
+	for _, dep := range in.DependsOn {
+		if dep == job {
+			writeError(w, http.StatusBadRequest, "a job cannot depend on itself")
+			return
+		}
+		if got, ok := s.Projects.ProjectOf(dep); !ok || got != in.ProjectID {
+			writeError(w, http.StatusBadRequest,
+				"a job can only depend on another job in the same project")
+			return
+		}
 	}
 	// Who, and where — before anything is held.
 	//

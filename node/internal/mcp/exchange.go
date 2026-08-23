@@ -127,6 +127,12 @@ func RegisterExchange(s *sdk.Server, x *Exchange) {
 		RequireInsuredToMinor int64      `json:"require_insured_to_minor,omitempty" jsonschema:"refuse anybody whose verified public liability cover is below this"`
 		WorkHours             int        `json:"work_hours,omitempty" jsonschema:"how long the work takes. Set this for anything longer than an errand, or the job is treated as abandoned partway through"`
 		Stages                []stageArg `json:"stages,omitempty" jsonschema:"cut a long job into pieces that are each evidenced and paid as they are finished. Their pay must add up to fee_minor"`
+		// Multi-part work. A scope with a real order between its pieces was
+		// not expressible: an agent could post three jobs at one address and
+		// nothing recorded that they were one job, or which had to come first.
+		DependsOn []string `json:"depends_on,omitempty" jsonschema:"job ids in the same project that must be finished and accepted before this one may be started. Use this wherever the order is real — a slab cures before anything drives on it — because otherwise two crews book the same ground for the same morning"`
+		BidsAsOne bool     `json:"bids_as_one,omitempty" jsonschema:"accept a single offer covering every job in this project, priced per job and awarded together or not at all. Set this when the jobs share a site: arriving once is most of the cost of a small job, and a supplier who cannot bundle prices one mobilisation per job or loses"`
+		PlanBy    string   `json:"plan_by,omitempty" jsonschema:"who decides how this job breaks into stages: \"buyer\" (default, you supply stages) or \"supplier\" (the winning bidder proposes the breakdown and you accept it). Use supplier for trade work you do not know how to decompose — a homeowner does not know what a binder course is, and guessing produces a schedule the crew is then judged against"`
 	}
 	sdk.AddTool(s, &sdk.Tool{Name: "do_in_world",
 		Description: "Have somebody go and do something physical — put up a sign, collect " +
@@ -143,6 +149,8 @@ func RegisterExchange(s *sdk.Server, x *Exchange) {
 				"project_id": a.ProjectID, "direct_to": a.DirectTo,
 				"site_id": a.SiteID, "reference": a.Reference,
 				"require_insured_to_minor": a.RequireInsuredToMinor,
+				"depends_on":               a.DependsOn, "bids_as_one": a.BidsAsOne,
+				"plan_by": a.PlanBy,
 			})
 			return jobResult(out, err)
 		})
@@ -366,6 +374,67 @@ func RegisterExchange(s *sdk.Server, x *Exchange) {
 		func(ctx context.Context, req *sdk.CallToolRequest, a acceptArgs) (*sdk.CallToolResult, any, error) {
 			out, err := x.call(ctx, "POST", "/v1/jobs/"+a.Job+"/award",
 				map[string]any{"bid": a.Bid})
+			return jobResult(out, err)
+		})
+
+	// Offers covering a whole project, and the plan the winner proposes.
+	//
+	// Without these an agent could post a scope a supplier can bundle and then
+	// had no way to read the bundle or accept it — the buyer's half of the
+	// feature was unreachable from the surface the buyer's agent uses.
+	type projectRefArgs struct {
+		Project string `json:"project" jsonschema:"the project id from open_project"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "list_project_bids",
+		Description: "Offers covering a whole project at once: what one supplier would " +
+			"charge for every piece, priced per piece, with how they would sequence it. " +
+			"A bundle is usually cheaper than the same jobs bid separately, because " +
+			"arriving once is most of the cost of a small job."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a projectRefArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/projects/"+a.Project+"/bids", nil)
+			return jobResult(out, err)
+		})
+
+	type acceptScopeArgs struct {
+		Project string `json:"project"`
+		Bid     string `json:"bid" jsonschema:"the offer id from list_project_bids"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "accept_project_bid",
+		Description: "Accept one offer covering several jobs. Every piece is awarded to " +
+			"that supplier and escrowed at its line amount, together or not at all. " +
+			"Check with your human first unless they set a ceiling and told you to get on " +
+			"with it — this commits the whole scope at once."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a acceptScopeArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "POST", "/v1/projects/"+a.Project+"/award",
+				map[string]any{"bid": a.Bid})
+			return jobResult(out, err)
+		})
+
+	type planArgs struct {
+		Job string `json:"job"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "read_stage_plan",
+		Description: "The breakdown a supplier proposed for a job you posted with " +
+			"plan_by \"supplier\": the stages, what proves each, and what each is worth. " +
+			"Nothing starts until you accept it."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a planArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "GET", "/v1/jobs/"+a.Job+"/plan", nil)
+			return jobResult(out, err)
+		})
+
+	type decidePlanArgs struct {
+		Job    string `json:"job"`
+		Accept bool   `json:"accept" jsonschema:"true to agree to the breakdown, false to send it back"`
+		Why    string `json:"why,omitempty" jsonschema:"required when sending it back: what you would accept instead"`
+	}
+	sdk.AddTool(s, &sdk.Tool{Name: "decide_stage_plan",
+		Description: "Accept a supplier's stage breakdown, or send it back with a reason. " +
+			"Accepting is what lets the crew start, and each stage is then paid as its own " +
+			"evidence is accepted rather than everything at the end. The total cannot " +
+			"change: it was settled when you accepted their bid."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a decidePlanArgs) (*sdk.CallToolResult, any, error) {
+			out, err := x.call(ctx, "POST", "/v1/jobs/"+a.Job+"/plan",
+				map[string]any{"accept": a.Accept, "why": a.Why})
 			return jobResult(out, err)
 		})
 

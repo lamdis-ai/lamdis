@@ -223,9 +223,54 @@ type Listing struct {
 	Reference string `json:"reference,omitempty"`
 
 	// ProjectID is the budget envelope this job draws on, if any.
+	//
+	// Published. It was carried on the listing and stripped by Public, so an
+	// operator was never told that the job in front of them was one piece of a
+	// larger scope at one address. See scope.go for why that is a pricing bug
+	// rather than a cosmetic one.
 	ProjectID string `json:"project_id,omitempty"`
+	// ProjectTitle is the whole scope in the buyer's words, carried on each
+	// piece so the board can say what the pieces add up to without a second
+	// lookup into a store operators cannot read.
+	ProjectTitle string `json:"project_title,omitempty"`
+	// Project is the shape of that scope, filled in by the board on the way
+	// out. Never set by a caller.
+	Project *ProjectBrief `json:"project,omitempty"`
+	// DependsOn names jobs that must be finished before this one may start.
+	//
+	// Physical work has an order that is real: a slab cures before anything
+	// drives on it, and you do not surface a drive the concrete truck still
+	// needs to cross. Without this the order lives only in somebody's head and
+	// two operators book the same ground for the same morning.
+	DependsOn []string `json:"depends_on,omitempty"`
+	// BidsAsOne means the buyer will consider a single offer covering every
+	// piece of the project, priced per piece and awarded together.
+	BidsAsOne bool `json:"bids_as_one,omitempty"`
+	// BlockedBy names dependencies not yet accepted, filled in on the way out
+	// so an operator sees why a piece cannot be taken today.
+	BlockedBy []string `json:"blocked_by,omitempty"`
+
+	// PlanBy says who decides how this job breaks into stages: the buyer who
+	// posted it, or the supplier who wins it. Empty means the buyer, so every
+	// job posted before this existed behaves exactly as it did.
+	PlanBy string `json:"plan_by,omitempty"`
+	// ProposedStages is a supplier's breakdown, waiting on the buyer.
+	ProposedStages []Stage `json:"proposed_stages,omitempty"`
+	// PlanState is "", "proposed" or "accepted".
+	PlanState string `json:"plan_state,omitempty"`
+	// PlanNote is why a plan was sent back.
+	PlanNote string `json:"plan_note,omitempty"`
 	// Cancelled marks work the buyer withdrew before anybody did it.
 	Cancelled bool `json:"cancelled,omitempty"`
+
+	// Accepted marks work that was submitted and passed verification.
+	//
+	// Deliberately not the same question as Finished below, which asks whether
+	// a listing can still be worked. A job whose only seat was taken by
+	// somebody who photographed the wrong thing is Finished and not Accepted,
+	// and a dependency must read the second: "the slab has cured" cannot become
+	// true because a stranger turned up and gave up.
+	Accepted bool `json:"accepted,omitempty"`
 
 	// Practice marks a job that exists so somebody can learn the flow, not
 	// because anybody wants the work done.
@@ -310,6 +355,12 @@ func (l *Listing) Public() *Listing {
 		DistanceMiles: l.DistanceMiles, Skills: l.Skills,
 		NotBefore: l.NotBefore, NotAfter: l.NotAfter,
 		Stages: l.Stages, WorkHours: l.WorkHours,
+		// Project membership is published; the budget behind it is not.
+		ProjectID: l.ProjectID, ProjectTitle: l.ProjectTitle,
+		DependsOn: l.DependsOn, BidsAsOne: l.BidsAsOne,
+		// Whether the winner writes the schedule is a term of the job, and an
+		// operator decides whether to bid partly on it.
+		PlanBy: l.PlanBy, PlanState: l.PlanState,
 		PostedByAgent: l.PostedByAgent, Practice: l.Practice,
 		SiteID: l.SiteID,
 		Report: l.Report,
@@ -360,6 +411,8 @@ type Board struct {
 	claims map[string]int
 	// bids holds offers on open jobs.
 	bids map[string][]*Bid
+	// projectBids holds offers covering a whole project at once.
+	projectBids map[string][]*ProjectBid
 	// leases records who holds a seat on each job and until when. A seat with
 	// no expiry is a seat somebody can hold forever, which is all it takes to
 	// kill a job: claim it, never submit, and the buyer's money sits locked
@@ -564,6 +617,13 @@ func (b *Board) ForOperator(worker string, cap Capacity) []*Listing {
 			continue
 		}
 		p := l.Public()
+		// What this job is a piece of. Without it the board shows three
+		// unrelated listings where there is one scope at one address, and an
+		// operator prices three mobilisations instead of one.
+		if l.ProjectID != "" {
+			p.Project = b.briefLocked(l.ProjectID, l.Job)
+		}
+		p.BlockedBy = b.blockedLocked(l)
 		if HasPosition(l.LatE7, l.LonE7) && cap.Positioned() {
 			p.DistanceMiles = round1(MilesBetween(l.LatE7, l.LonE7, cap.LatE7, cap.LonE7))
 		}
@@ -634,6 +694,37 @@ func (b *Board) Claim(job, client string) (secret string, l *Listing, err error)
 		// that this buyer has a vendor, and that it is not them, is telling
 		// them about a commercial relationship that is none of their business.
 		return "", nil, ErrUnavailable
+	}
+	// Work that cannot start yet, because something else has to happen first.
+	//
+	// Checked here rather than only shown on the board, or the order is
+	// decorative: two operators read the same listing, both take it, and one
+	// of them drives to a site where the ground is still wet. The dependency
+	// names the blocking job because the operator is very likely bidding on
+	// that one too.
+	if len(item.DependsOn) > 0 {
+		var waiting []string
+		for _, dep := range item.DependsOn {
+			if d, ok := b.listings[dep]; ok && !d.Accepted {
+				waiting = append(waiting, d.Title)
+			}
+		}
+		if len(waiting) > 0 {
+			return "", nil, fmt.Errorf(
+				"board: this cannot start until %s is finished and accepted",
+				strings.Join(waiting, " and "))
+		}
+	}
+	// A job whose schedule the supplier writes cannot start until that
+	// schedule is agreed. Otherwise the crew works an unstaged job, is paid
+	// once at the end, and the staging that was the whole point never happens.
+	if item.PlanBy == PlanBySupplier && item.PlanState != PlanAccepted {
+		if item.PlanState == PlanProposed {
+			return "", nil, fmt.Errorf(
+				"board: your plan is with the buyer; work can start once they accept it")
+		}
+		return "", nil, fmt.Errorf(
+			"board: this job needs a stage plan from you before it can start")
 	}
 	// What the buyer insists on before anybody sets foot on their property.
 	if item.Requires != nil && b.Suppliers != nil {
@@ -1064,6 +1155,16 @@ func (b *Board) Done(job, client string) {
 	b.completed[acct]++
 }
 
+// Accept records that a job's work passed verification, which is what
+// releases anything waiting on it.
+func (b *Board) Accept(job string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if l, ok := b.listings[job]; ok {
+		l.Accepted = true
+	}
+}
+
 // ExpireLapsedClaims returns seats nobody used, and reports how many. Called
 // on a timer, because nothing else looks at a claim once it is made.
 func (b *Board) ExpireLapsedClaims() int {
@@ -1237,7 +1338,12 @@ func (b *Board) handleList(w http.ResponseWriter, r *http.Request) {
 			// Directed work is not a market event and does not belong on a
 			// public board: it is already assigned.
 			if IsWork(l.Kind) && !l.Directed() {
-				tasks = append(tasks, l.Public())
+				p := l.Public()
+				if l.ProjectID != "" {
+					p.Project = b.BriefFor(l.Job)
+				}
+				p.BlockedBy = b.Blocked(l.Job)
+				tasks = append(tasks, p)
 			}
 		}
 	}

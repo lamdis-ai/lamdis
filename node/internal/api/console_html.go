@@ -101,6 +101,7 @@ textarea:focus-visible, .amt-in:focus-visible { outline: 2px solid var(--gold);
     <span class="label grp">Operation</span>
     <a href="/console" aria-current="page">Earnings</a>
     <a href="#capacity">Capacity</a>
+    <a href="#larger">Larger jobs</a>
     <a href="#integration">Integration</a>
   </nav>
   <main class="main">
@@ -301,6 +302,122 @@ function earnings() {
 var KINDS = [["observe", "Checks"], ["do", "Errands & jobs"], ["review", "Verification"]];
 var SKILLS = [];
 var SPEND = null;
+// The demonstration scope, and its id. Named once so the section and the
+// example calls it prints can never drift apart.
+var SCOPE = null;
+var DEMO_PROJECT = "proj-demo-paving";
+
+// Multi-part work, explained where the person who needs it is standing.
+//
+// A paving contractor's agent that can bid on three separate listings is not
+// the same thing as one that can price a scope. The difference is worth real
+// money to them and the console said nothing about it at all: three project
+// references in the whole page, every one of them a counter in the buyer's
+// spending pane.
+//
+// SCOPE is the demonstration project, fetched alongside everything else. It is
+// a real listing on a real board with real rules, marked practice throughout,
+// so a business can read exactly how a job too big for one visit behaves
+// before deciding whether to wire anything up.
+function largerJobs() {
+  var sc = SCOPE, pieces = "", n = 0;
+  if (sc && sc.jobs && sc.jobs.length) {
+    pieces = sc.jobs.map(function (j) {
+      n++;
+      var blocked = (j.blocked_by || []).length > 0;
+      // Generic. An earlier draft explained the paving demo's own reason
+      // here — "the mixer crosses this ground" — which would have been
+      // asserted over every blocked piece of every project, including ones
+      // with nothing to do with concrete.
+      var sub = blocked
+        ? "Cannot start until piece " + pieceNumber(sc, j.blocked_by[0]) +
+          " is finished and accepted"
+        : "Can start as soon as it is awarded";
+      return '<div class="piece' + (blocked ? " blocked" : "") + '">' +
+        '<div class="num">' + n + '</div>' +
+        '<div><div class="t">' + esc(j.title) + '</div>' +
+        '<div class="s' + (blocked ? " warn" : "") + '">' + sub + '</div></div>' +
+        '</div>';
+    }).join("");
+  }
+
+  return '<h2 id="larger">Larger jobs</h2>' +
+  '<p class="lead">Work that takes more than one visit, more than one place, or ' +
+    'more than one trade. Everything below is live on the board right now as a ' +
+    'demonstration you can read, price and bid against without a cent moving.</p>' +
+
+  (pieces
+    ? '<div class="scope">' +
+        '<div class="hd"><b>' + esc((sc.project && sc.project.title) || "Demonstration scope") +
+          '</b><span>' + esc(sc.jobs.length) + ' pieces &middot; ' +
+          ((sc.project && sc.project.one_visit) ? "one address" : (sc.project.sites + " sites")) +
+          '</span></div>' + pieces +
+      '</div>'
+    : '<div class="note-box">The demonstration scope is not on this board.</div>') +
+
+  '<div class="note-box"><b>Why the grouping matters.</b> Getting a crew and a ' +
+    'paver to a site is most of the cost of a small job. Three jobs at one ' +
+    'address is <b>one</b> mobilisation. Shown as three unrelated listings, you ' +
+    'either price three of them and lose, or price one and are ruined if you win ' +
+    'two. So the board says what a job is a piece of, and you can make one offer ' +
+    'for the whole thing.</div>' +
+
+  '<div class="panes">' +
+    '<div class="pane">' +
+      '<h3>One offer, all or nothing</h3>' +
+      '<p class="why">Price each piece, send it as one bid. It is awarded ' +
+        'together or not at all, so the piece carrying your mobilisation cannot ' +
+        'be cherry-picked away from the pieces that pay for it.</p>' +
+    '</div>' +
+    '<div class="pane">' +
+      '<h3>Order that is enforced</h3>' +
+      '<p class="why">A piece that depends on another cannot be claimed until ' +
+        'that one is finished <i>and accepted</i>. Nobody else can book the ' +
+        'ground you need on the morning you need it.</p>' +
+    '</div>' +
+    '<div class="pane">' +
+      '<h3>You write the stages</h3>' +
+      '<p class="why">On these jobs the buyer says what they want and what they ' +
+        'will pay. <b>You</b> say how it breaks down &mdash; prep, base, binder, ' +
+        'surface &mdash; and what each is worth, and you are paid per stage as ' +
+        'each is accepted. A homeowner does not know what a binder course is, ' +
+        'and neither does their agent.</p>' +
+    '</div>' +
+    '<div class="pane">' +
+      '<h3>Many sites, one buyer</h3>' +
+      '<p class="why">A project can span locations as easily as trades. Each ' +
+        'piece carries the buyer\'s own site reference, so four hundred stores ' +
+        'stay distinguishable on the receipts your accounts department reads.</p>' +
+    '</div>' +
+  '</div>' +
+
+  '<h3 style="margin:1.4rem 0 .6rem;font-size:.92rem">What your agent calls</h3>' +
+  '<pre class="api">' +
+    '<b>GET</b>  /v1/scope/' + esc(DEMO_PROJECT) + '\n' +
+    '     the whole scope, in the order it has to happen, with what blocks what\n\n' +
+    '<b>POST</b> /v1/scope/' + esc(DEMO_PROJECT) + '/bid\n' +
+    '     { "lines": [ {"job":"...","amount_minor":480000,\n' +
+    '                   "note":"carries mobilisation for all three"}, ... ],\n' +
+    '       "note": "slab first, cure over the weekend, both drives Mon-Tue",\n' +
+    '       "all_or_nothing": true }\n\n' +
+    '<b>POST</b> /v1/workers/plan/{job}\n' +
+    '     { "stages": [ {"name":"Aggregate base",\n' +
+    '                    "deliverable":"Base compacted to depth",\n' +
+    '                    "pay_minor":150000}, ... ] }\n' +
+    '     your breakdown; the stages must add up to the price you were awarded' +
+  '</pre>' +
+  '<p class="why" style="margin-bottom:1.4rem">Same signing as every other ' +
+    'route. Full reference in <a href="/docs">the docs</a>.</p>';
+}
+
+// pieceNumber turns a job id into its position, so a dependency reads as
+// "waits on piece 1" rather than as an identifier nobody recognises.
+function pieceNumber(sc, job) {
+  for (var i = 0; i < sc.jobs.length; i++) {
+    if (sc.jobs[i].job === job) { return i + 1; }
+  }
+  return "?";
+}
 
 function capacity() {
   var c = CAP.capacity, st = CAP.standing || {};
@@ -560,7 +677,7 @@ function reviewAction(job, action, reason) {
 
 function render() {
   document.getElementById("body").innerHTML =
-    earnings() + spending() + capacity() + integration();
+    earnings() + spending() + capacity() + largerJobs() + integration();
   wire();
 }
 
@@ -775,7 +892,12 @@ function load() {
     workerHeaders("GET", "/v1/capacity").then(function (h) { return fetch("/v1/capacity", {headers: h}); }),
     workerHeaders("GET", "/v1/agent-keys").then(function (h) { return fetch("/v1/agent-keys", {headers: h}); }),
     fetch("/v1/skills"),
-    workerHeaders("GET", "/v1/spend").then(function (h) { return fetch("/v1/spend", {headers: h}); })
+    workerHeaders("GET", "/v1/spend").then(function (h) { return fetch("/v1/spend", {headers: h}); }),
+    // The demonstration scope. Failing to load it must not take the console
+    // with it, so it resolves to a null-bodied response rather than rejecting.
+    workerHeaders("GET", "/v1/scope/" + DEMO_PROJECT)
+      .then(function (h) { return fetch("/v1/scope/" + DEMO_PROJECT, {headers: h}); })
+      .catch(function () { return {ok: false, status: 0, json: function () { return null; }}; })
   ]).then(function (rs) {
     if (handleAuthFailure(rs[0].status)) { return null; }
     return Promise.all(rs.map(function (r) { return r.ok ? r.json() : null; }));
@@ -786,6 +908,7 @@ function load() {
     KEYS = (out[2] && out[2].keys) || [];
     SKILLS = (out[3] && out[3].skills) || [];
     SPEND = out[4] || null;
+    SCOPE = out[5] || null;
     render();
   }).catch(function () {
     document.getElementById("body").innerHTML =

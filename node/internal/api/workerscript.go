@@ -98,6 +98,21 @@ function loadWorker() {
   } catch (e) {}
   return null;
 }
+
+// saveWorker persists who this is, so the /v1/me round trip below happens once
+// rather than on every page.
+//
+// This was called and never defined. The consequence was not a missing cache:
+// session() calls it inside a promise chain whose .catch clears the session, so
+// the ReferenceError was swallowed and read as "this token is no good". Anybody
+// holding a valid token with no cached worker id — a second tab, a fresh
+// device, cleared site data, or simply the first navigation after signing in —
+// was silently signed out and bounced to /signin. The comment on session()
+// describes fixing exactly this. The fix was written; the function it depended
+// on never was.
+function saveWorker(w) {
+  try { localStorage.setItem("lamdis.worker", JSON.stringify(w)); } catch (e) {}
+}
 function clearSession() {
   try {
     localStorage.removeItem("lamdis.token");

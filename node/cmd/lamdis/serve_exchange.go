@@ -82,6 +82,10 @@ func cmdServeExchange(args []string) error {
 		if err := seedBoard(srv); err != nil {
 			return err
 		}
+		// A worked example of multi-part work, for the side that would do it.
+		if err := seedDemoProject(srv); err != nil {
+			return err
+		}
 	}
 
 	fmt.Printf("lamdis exchange\n")
@@ -247,7 +251,7 @@ func seedPanel(srv *exchange.Server) error {
 		Job: "panel-demo-1", Parent: "practice-1",
 		Question:  "Does this photograph show a FOR LEASE sign at the address given?",
 		Context:   "Automated verification reached 73%, below the 90% the buyer asked for.",
-		Reviewers: 3, Agreement: 2,
+		Reviewers: 3, Agreement: 2, Practice: true,
 		FeeMinor: 150, BonusMinor: 100, Currency: "USD",
 		Expires: now.Add(2 * time.Hour),
 	}, samplePhoto(), "image/jpeg")

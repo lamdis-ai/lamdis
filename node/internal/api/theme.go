@@ -131,6 +131,37 @@ button, input, textarea { font: inherit; }
 
 h1 { margin: 0 0 .3rem; font: 700 1.45rem/1.15 var(--sans); letter-spacing: -.03em; }
 .lead { margin: 0 0 1.4rem; color: var(--ink-2); font-size: .92rem; }
+
+/* Multi-part work, explained. A contractor arriving at the console found
+   capacity sliders and an open board, and no answer to the question they
+   actually have: what does a job too big for one visit look like here. */
+.scope { border: 1px solid var(--rule); border-radius: 3px; margin: 0 0 1.4rem;
+         overflow: hidden; }
+.scope > .hd { display: flex; gap: .6rem; align-items: baseline;
+               padding: .8rem .95rem; background: var(--panel);
+               border-bottom: 1px solid var(--rule); }
+.scope > .hd b { font-size: .92rem; }
+.scope > .hd span { font-size: .78rem; color: var(--ink-3); margin-left: auto; }
+.piece { display: flex; gap: .75rem; padding: .8rem .95rem;
+         border-bottom: 1px solid var(--rule); align-items: flex-start; }
+.piece:last-child { border-bottom: 0; }
+.piece .num { width: 1.35rem; height: 1.35rem; flex: none; border-radius: 50%;
+              background: var(--panel-2); color: var(--ink-2);
+              font: 700 .72rem/1.35rem var(--mono); text-align: center; }
+.piece.blocked .num { background: #3A2510; color: var(--warn); }
+.piece .t { font-size: .88rem; }
+.piece .s { font-size: .78rem; color: var(--ink-3); margin-top: .18rem; }
+.piece .s.warn { color: var(--warn); }
+.piece .amt { margin-left: auto; font: 500 .8rem/1 var(--mono); color: var(--ink-2);
+              white-space: nowrap; }
+.note-box { border: 1px solid var(--rule); border-left: 2px solid var(--gold);
+            background: var(--panel); padding: .75rem .9rem; margin: 0 0 1.2rem;
+            font-size: .84rem; color: var(--ink-2); border-radius: 0 3px 3px 0; }
+.note-box b { color: var(--ink); }
+pre.api { background: var(--bg); border: 1px solid var(--rule); border-radius: 3px;
+          padding: .8rem .9rem; overflow-x: auto; margin: 0 0 1.2rem;
+          font: 500 .76rem/1.6 var(--mono); color: var(--ink-2); }
+pre.api b { color: var(--gold); font-weight: 500; }
 h2 {
   margin: 1.8rem 0 .7rem; font: 600 .64rem/1 var(--mono);
   letter-spacing: .15em; text-transform: uppercase; color: var(--ink-3);

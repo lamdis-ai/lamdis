@@ -25,8 +25,11 @@ type ReviewPanel struct {
 	Agreement   int
 	FeeMinor    int64
 	BonusMinor  int64
-	Currency    string
-	Expires     time.Time
+	// Practice marks the demonstration panel: a real page, a real flow, and
+	// nothing behind it.
+	Practice bool
+	Currency string
+	Expires  time.Time
 }
 
 // Review is one person's answer.
@@ -299,6 +302,10 @@ func (s *ReviewServer) handleBrief(w http.ResponseWriter, r *http.Request, c *Ca
 		"bonus_minor": p.BonusMinor,
 		"currency":    p.Currency,
 		"received":    t.Admissible,
+		// Whether this is the demonstration panel. A page that looks identical
+		// to a real one, judging a drawing rather than a place, teaches
+		// somebody that the whole exchange is theatre.
+		"practice":    p.Practice,
 		"attested_by": c.Attestation(),
 		"expires":     p.Expires.Format(time.RFC3339),
 	})

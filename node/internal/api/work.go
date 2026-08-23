@@ -490,9 +490,14 @@ func (s *WorkServer) handleFinalize(w http.ResponseWriter, r *http.Request, c *C
 				s.Board.Progress(c.Job, worker, stageIdx)
 				if _, _, all := s.Board.NextStage(c.Job, worker); all {
 					s.Board.Done(c.Job, worker)
+					s.Board.Accept(c.Job)
 				}
 			} else if !staged {
 				s.Board.Done(c.Job, worker)
+				// Only an accepted submission releases what waits on this job.
+				if stored.Verified {
+					s.Board.Accept(c.Job)
+				}
 			}
 		}
 	}

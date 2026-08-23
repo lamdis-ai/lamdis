@@ -55,10 +55,70 @@ const reviewPageTop = `<!doctype html>
           border-radius:.6rem; text-align:center }
   .err { color:#fca5a5; margin-top:.75rem; min-height:1.2rem }
   .muted { color:#64748b }
+
+  /* A page that never says what it is, is a page nobody trusts with a
+     photograph of somebody's property. The header does that in two lines. */
+  .hd { display:flex; gap:.7rem; align-items:center; margin:0 0 1.5rem;
+        padding-bottom:1rem; border-bottom:1px solid #1e293b }
+  .mark { width:2rem; height:2rem; flex:none; border-radius:.45rem;
+          background:linear-gradient(140deg,#38bdf8,#6366f1); color:#020617;
+          font:700 1.1rem/2rem ui-sans-serif,sans-serif; text-align:center }
+  .brand { margin:0; font-weight:650; letter-spacing:-.01em }
+  .kicker { margin:.1rem 0 0; font-size:.8rem; color:#64748b; line-height:1.35 }
+
+  /* Loading was the word "Loading". A shape that resembles the answer reads
+     as a page that is working rather than one that has stopped. */
+  .sk { background:#0f172a; border-radius:.5rem; margin-bottom:.8rem;
+        animation:pulse 1.4s ease-in-out infinite }
+  .sk-q { height:2.6rem } .sk-c { height:1.2rem; width:70% } .sk-img { height:11rem }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+
+  .demo { display:flex; gap:.6rem; padding:.7rem .85rem; margin:0 0 1.1rem;
+          background:#1c1917; border:1px solid #44403c; border-left:3px solid #f59e0b;
+          border-radius:.5rem; font-size:.86rem; color:#d6d3d1 }
+  .steps { list-style:none; margin:0 0 1.25rem; padding:0; counter-reset:s }
+  .steps li { position:relative; padding:0 0 .55rem 1.7rem; font-size:.86rem;
+              color:#94a3b8; counter-increment:s }
+  .steps li::before { content:counter(s); position:absolute; left:0; top:.05rem;
+        width:1.15rem; height:1.15rem; border-radius:50%; background:#1e293b;
+        color:#94a3b8; font-size:.68rem; font-weight:700; text-align:center;
+        line-height:1.15rem }
+  .steps li.now { color:#e2e8f0 }
+  .steps li.now::before { background:#38bdf8; color:#020617 }
+
+  .prog { display:flex; gap:.3rem; margin:0 0 1.25rem }
+  .prog span { flex:1; height:.28rem; border-radius:.15rem; background:#1e293b }
+  .prog span.in { background:#38bdf8 }
+  .prog span.you { background:#facc15 }
+
+  .look { margin:0 0 .6rem; font-size:.82rem; color:#64748b }
+  figure { margin:0 0 1rem }
+  figcaption { font-size:.78rem; color:#64748b; margin-top:-.6rem }
+
+  details { margin:1.25rem 0 0; border-top:1px solid #1e293b; padding-top:.9rem }
+  summary { cursor:pointer; color:#94a3b8; font-size:.86rem; list-style:none }
+  summary::-webkit-details-marker { display:none }
+  summary::before { content:"›"; display:inline-block; margin-right:.4rem;
+                    transition:transform .15s }
+  details[open] summary::before { transform:rotate(90deg) }
+  details p { font-size:.84rem; color:#64748b; margin:.7rem 0 0 }
+  .empty { padding:1.5rem 1.25rem; background:#0f172a; border:1px solid #1e293b;
+           border-radius:.6rem }
+  .empty h2 { margin:0 0 .5rem; font-size:1.05rem }
+  .empty p { margin:0 0 .7rem; color:#94a3b8; font-size:.9rem }
+  .empty a { color:#7dd3fc }
 </style>
 <main>
-  <h1>Review request</h1>
-  <div id="app"><p class="muted">Loading&hellip;</p></div>
+  <header class="hd">
+    <div class="mark" aria-hidden="true">L</div>
+    <div>
+      <p class="brand">Lamdis</p>
+      <p class="kicker">A person is being asked, because software was not sure</p>
+    </div>
+  </header>
+  <div id="app" class="skel" aria-live="polite">
+    <div class="sk sk-q"></div><div class="sk sk-c"></div><div class="sk sk-img"></div>
+  </div>
 </main>
 <script>
 `
@@ -191,19 +251,128 @@ const reviewPageScript = `
     return { ok: res.ok, data: data };
   }
 
+  // The panel, drawn so somebody who has never seen this page knows within a
+  // few seconds what they are being asked and why it is them being asked.
+  //
+  // What was here before was a question, a price, a photograph and two buttons.
+  // Everything true about the situation — that a machine tried first and was
+  // not sure, that two other people are being asked the same thing, that
+  // nobody sees anyone else's answer, that saying "I cannot tell" is paid the
+  // same — was known to the server and shown to nobody.
+  // wireNext arms the "verify another" button, wherever it appears.
+  //
+  // Two pages need it — the thank-you after an answer, and a link that has
+  // already closed — and the second one is exactly where somebody is most
+  // likely to leave. Duplicating it was how one copy kept a bug the other
+  // had lost.
+  function wireNext() {
+    var btn = document.getElementById("next");
+    if (!btn) { return; }
+    btn.onclick = function () {
+        var b = this, e = document.getElementById("nexterr");
+        b.disabled = true; b.textContent = "Finding one…"; e.textContent = "";
+        // A hard ceiling on how long "Finding one…" may sit there. Even if a
+        // fetch never settles, the person gets an answer and a working button.
+        var wedged = setTimeout(function () {
+          if (!b.disabled) { return; }
+          e.textContent = "That is taking too long. Try again.";
+          b.disabled = false; b.textContent = "Verify another";
+        }, 12000);
+        var release = function () { clearTimeout(wedged); };
+        // The next panel is assigned, exactly as this one was. There is no
+        // path here that lets a reviewer pick.
+        // session(), not enrol(). There has never been an enrol() in this
+        // page's scope, so this line threw a ReferenceError synchronously —
+        // before the .catch below was ever attached — and the throw escaped
+        // the click handler with the button already disabled. The reviewer
+        // was left on "Finding one…" forever, with nothing logged and no way
+        // back except reloading. Every promise chain reachable from a click
+        // is now started inside a try, so a bad identifier degrades to a
+        // message instead of wedging the page.
+        Promise.resolve()
+          .then(function () { return session(); })
+          .then(function (who) {
+            if (!who) { throw new Error("signed out"); }
+            return workerHeaders("POST", "/v1/workers/assign");
+          })
+          .then(function (h) { return fetch("/v1/workers/assign", {method:"POST", headers:h}); })
+          .then(function (r) { return r.json().then(function (j) { return {ok:r.ok, body:j}; }); })
+          .then(function (res) {
+            if (!res.ok) { throw new Error("none"); }
+            release();
+            window.location.href = res.body.url;
+          })
+          .catch(function (err) {
+            release();
+            // Two different failures used to read identically, and both left
+            // the button dead. Somebody signed out was told there was no work
+            // — which is false, and sends them away instead of to sign-in.
+            if (err && err.message === "signed out") {
+              e.innerHTML = 'Your session ended. ' +
+                '<a href="/signin?next=/board">Sign in</a> to keep verifying.';
+            } else {
+              e.textContent = "Nothing more to verify right now. Check back shortly.";
+            }
+            // Re-enabled, always. A button that disables itself on a
+            // transient failure makes a refresh the only way forward, and
+            // most people read that as the site being broken.
+            b.disabled = false; b.textContent = "Verify another";
+          });
+    };
+  }
+
   function render(brief) {
+    var total = brief.reviewers || 1;
+    var have = brief.received || 0;
+
+    // Where this person sits in the panel. Somebody deciding how much care to
+    // take is entitled to know they are not the only one looking, and equally
+    // that their answer is not a formality.
+    var pips = "";
+    for (var i = 0; i < total; i++) {
+      pips += '<span class="' + (i < have ? "in" : i === have ? "you" : "") + '"></span>';
+    }
+
     var imgs = (brief.evidence || []).map(function (sha) {
-      return '<img alt="evidence" data-sha="' + esc(sha) + '">';
+      return '<figure><img alt="The photograph submitted for this job" ' +
+        'data-sha="' + esc(sha) + '">' +
+        '<figcaption>Submitted by whoever did the work. ' +
+        'Tap to open it full size.</figcaption></figure>';
     }).join("");
+
+    app.className = "";
     app.innerHTML =
+      (brief.practice
+        ? '<div class="demo"><div>&#9888;</div><div><b>This is a demonstration.</b> ' +
+          'Nothing here is real work, no money moves, and the photograph is a ' +
+          'drawing rather than a place. Everything else &mdash; the question, ' +
+          'the panel, how an answer is recorded &mdash; is exactly what a real ' +
+          'review does.</div></div>'
+        : "") +
+
+      '<div class="prog" role="img" aria-label="' +
+        esc(have + " of " + total + " reviewers have answered") + '">' + pips + '</div>' +
+
+      '<ol class="steps">' +
+        '<li>Automated verification ran and was not confident enough</li>' +
+        '<li class="now">' + esc(total) + ' people are asked the same question, separately</li>' +
+        '<li>' + esc(brief.agreement || 2) + ' answering the same way settles it, and money moves</li>' +
+      '</ol>' +
+
       '<p class="q">' + esc(brief.question) + '</p>' +
       (brief.context ? '<p class="ctx">' + esc(brief.context) + '</p>' : '') +
+
       '<dl class="pay">' +
-        '<div><dt>To review</dt><dd>' + money(brief.fee_minor, brief.currency) + '</dd></div>' +
-        '<div><dt>If you agree with the panel</dt><dd>+' +
+        '<div><dt>To look</dt><dd>' + money(brief.fee_minor, brief.currency) + '</dd></div>' +
+        '<div><dt>If the panel agrees with you</dt><dd>+' +
           money(brief.bonus_minor, brief.currency) + '</dd></div>' +
       '</dl>' +
+
+      '<p class="look">Answer only from what is in the photograph. ' +
+        'If it does not show enough to tell, say so &mdash; that is the answer, ' +
+        'and it pays the same.</p>' +
       imgs +
+
       '<textarea id="reason" placeholder="What do you see? A sentence is enough."></textarea>' +
       '<div class="row">' +
         '<button class="yes" id="yes">Yes</button>' +
@@ -211,8 +380,22 @@ const reviewPageScript = `
       '</div>' +
       '<button class="unsure" id="unsure">I cannot tell from this</button>' +
       '<p class="err" id="err"></p>' +
-      '<p class="note">You are paid for looking, whichever way you answer. ' +
-        'Saying you cannot tell is a real answer.</p>';
+
+      '<details><summary>How this works, and why you</summary>' +
+        '<p>Somebody paid for a job to be done and the money is held until ' +
+          'there is proof it was. Software judged the photograph first and ' +
+          'landed short of the certainty the buyer asked for, so the question ' +
+          'comes to people instead.</p>' +
+        '<p>You are one of ' + esc(total) + '. You cannot see the others&rsquo; ' +
+          'answers and they cannot see yours, which is the point &mdash; a ' +
+          'panel that can see itself is one answer, not ' + esc(total) + '.</p>' +
+        '<p>You are paid for looking, whichever way you answer, and you are ' +
+          'not paid more for agreeing. Withholding pay from the minority ' +
+          'would buy agreement rather than judgement, which is worth nothing.</p>' +
+        '<p>You were assigned this. Nobody on the exchange chooses which ' +
+          'evidence they judge, because anybody who could choose would ' +
+          'eventually choose their own work.</p>' +
+      '</details>';
 
     // Images are fetched with the capability, so they cannot be hotlinked.
     Array.prototype.forEach.call(app.querySelectorAll("img[data-sha]"), async function (img) {
@@ -222,7 +405,15 @@ const reviewPageScript = `
       var res = await fetch(path, {
         headers: { "X-Lamdis-Timestamp": ts, "X-Lamdis-Capability": job + "." + proof }
       });
-      if (res.ok) img.src = URL.createObjectURL(await res.blob());
+      if (!res.ok) { return; }
+      var url = URL.createObjectURL(await res.blob());
+      img.src = url;
+      // The caption says the photograph opens full size, so it has to. A
+      // reviewer judging whether a sign is legible is doing it on a phone,
+      // where the difference between a thumbnail and the full frame is the
+      // difference between an answer and a guess.
+      img.style.cursor = "zoom-in";
+      img.onclick = function () { window.open(url, "_blank", "noopener"); };
     });
 
     var buttons = ["yes", "no", "unsure"];
@@ -246,33 +437,27 @@ const reviewPageScript = `
         // Finishing must not be a dead end. A reviewer who has just done the
         // work is exactly the person most likely to do another, and leaving
         // them on a page with no way forward wastes that and reads as broken.
-        app.innerHTML = '<div class="done"><p><strong>Thank you.</strong></p>' +
-          '<p class="muted">Your review is recorded. ' + esc(out.data.received) +
-          ' of ' + esc(brief.reviewers) + ' received.</p>' +
+        var got = out.data.received, want = brief.reviewers;
+        var settled = got >= want;
+        app.innerHTML = '<div class="done">' +
+          '<p><strong>Thank you &mdash; that is recorded.</strong></p>' +
+          '<p class="muted">' + esc(got) + ' of ' + esc(want) + ' answers in. ' +
+            (settled
+              ? 'The panel is complete, and the money settles on it.'
+              : 'It settles once ' + esc(want) + ' people have looked.') +
+          '</p>' +
+          '<p class="muted">' + money(brief.fee_minor, brief.currency) +
+            ' for looking is yours either way' +
+            (brief.bonus_minor
+              ? ', plus ' + money(brief.bonus_minor, brief.currency) +
+                ' if the panel lands where you did'
+              : '') +
+            '. It reaches your account with your next payout.</p>' +
           '<div class="row"><button id="next">Verify another</button></div>' +
-          '<p class="note"><a href="/board">Back to open work</a></p>' +
-          '<div class="err" id="nexterr"></div></div>';
+          '<p class="err" id="nexterr"></p>' +
+          '<p class="note"><a href="/board">Back to open work</a></p></div>';
 
-        document.getElementById("next").onclick = function () {
-          var b = this, e = document.getElementById("nexterr");
-          b.disabled = true; b.textContent = "Finding one…"; e.textContent = "";
-          // The next panel is assigned, exactly as this one was. There is no
-          // path here that lets a reviewer pick.
-          enrol()
-            .then(function () { return workerHeaders("POST", "/v1/workers/assign"); })
-            .then(function (h) { return fetch("/v1/workers/assign", {method:"POST", headers:h}); })
-            .then(function (r) { return r.json().then(function (j) { return {ok:r.ok, body:j}; }); })
-            .then(function (res) {
-              if (!res.ok) { throw new Error("none"); }
-              window.location.href = res.body.url;
-            })
-            .catch(function () {
-              // Whatever the exchange called it internally, what the person
-              // needs to know is that there is nothing for them right now.
-              e.textContent = "Nothing more to verify right now. Check back shortly.";
-              b.disabled = true; b.textContent = "Verify another";
-            });
-        };
+        wireNext();
       };
     };
     document.getElementById("yes").onclick = answer(true, true);
@@ -282,15 +467,49 @@ const reviewPageScript = `
 
   (async function () {
     try {
+      // Somebody arrives here without the code far more often than the old
+      // wording assumed: a link copied out of a message, an address bar
+      // retyped, a page reopened from history after the fragment was erased.
+      // Telling them only that something is missing leaves them stuck on a
+      // page that has not said what it is for.
       if (!secret) {
-        app.innerHTML = '<p class="muted">This link is missing its access code. ' +
-          'Open the full link you were sent, including everything after the # sign.</p>';
+        app.className = "";
+        app.innerHTML =
+          '<div class="empty">' +
+            '<h2>This link needs its access code</h2>' +
+            '<p>Review links end in a <b>#</b> followed by a code, and the part ' +
+              'after the # is what proves the link is yours. It is never sent ' +
+              'to us, which is why it cannot be recovered from this page.</p>' +
+            '<p>Open the original link again, in full. If it came in a ' +
+              'message, follow it from there rather than copying the address.</p>' +
+          '</div>' +
+          '<details open><summary>What is this page?</summary>' +
+            '<p>Lamdis is an exchange where software agents pay people to do ' +
+              'things in the physical world, and payment settles against ' +
+              'evidence that the work happened. When automated checks on that ' +
+              'evidence are not confident enough, a small panel of people is ' +
+              'asked instead. This is that page.</p>' +
+            '<p><a href="/board">See work that is open now</a> &middot; ' +
+              '<a href="/docs">How the exchange works</a></p>' +
+          '</details>';
         return;
       }
       var out = await call("GET", "/v1/claims/" + job, null);
       if (!out.ok) {
-        app.innerHTML = '<p class="muted">This link is no longer valid. ' +
-          'It may have expired or already been used.</p>';
+        app.className = "";
+        app.innerHTML =
+          '<div class="empty">' +
+            '<h2>This review is closed</h2>' +
+            '<p>Either enough people answered and the panel settled, or the ' +
+              'link ran out of time. Both end the same way: there is nothing ' +
+              'left to look at here.</p>' +
+            '<p>If you answered before it closed, your review still counts and ' +
+              'is still paid.</p>' +
+          '</div>' +
+          '<div class="row"><button id="next">Verify something else</button></div>' +
+          '<p class="err" id="nexterr"></p>' +
+          '<p class="note"><a href="/board">Back to open work</a></p>';
+        wireNext();
         return;
       }
       render(out.data);

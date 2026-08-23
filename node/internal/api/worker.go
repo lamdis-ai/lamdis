@@ -213,6 +213,8 @@ func (s *WorkerServer) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workers/bid/{job}", s.handleBid)
 	mux.HandleFunc("GET /v1/workers/holdings", s.handleHoldings)
 	mux.HandleFunc("POST /v1/workers/giveback/{job}", s.handleGiveBack)
+	// The supply side's view of multi-part work. See scope_api.go.
+	s.registerScope(mux)
 }
 
 // handleRegister creates or returns a worker.
