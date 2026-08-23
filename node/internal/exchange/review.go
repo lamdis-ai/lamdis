@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/api"
@@ -104,19 +105,39 @@ func (s *Server) handleHold(w http.ResponseWriter, r *http.Request, key *account
 		return
 	}
 	var in struct {
+		Ground string `json:"ground"`
 		Reason string `json:"reason"`
 	}
 	json.Unmarshal(body, &in)
-	if in.Reason == "" {
+	// A ground, not a mood.
+	//
+	// This route used to take any sentence at all and freeze the worker's
+	// money on the strength of it, forever. The deliverable was agreed before
+	// the work started so that neither side could move it afterwards, and an
+	// objection has to be about that rather than about how the buyer feels on
+	// the day.
+	if !ValidGround(in.Ground) {
+		writeJSONResponse(w, map[string]any{
+			"error": "an objection has to name what is wrong with the work " +
+				"against what was agreed",
+			"grounds": Grounds(),
+			"note": "if the deliverable was met and you simply want something " +
+				"more, that is a new job rather than a reason not to pay for " +
+				"this one",
+		})
+		return
+	}
+	if strings.TrimSpace(in.Reason) == "" {
 		writeError(w, http.StatusBadRequest,
-			"say what is wrong; a hold with no reason cannot be resolved by anybody")
+			"say what is wrong in your own words as well; a panel has to read it")
 		return
 	}
 	if s.Holdbacks == nil {
 		writeError(w, http.StatusServiceUnavailable, "nothing is being held")
 		return
 	}
-	n := s.Holdbacks.Hold(job, in.Reason)
+	until := s.now().Add(DisputeWindow)
+	n := s.Holdbacks.Hold(job, GroundLabel(in.Ground)+": "+in.Reason, until)
 	if n == 0 {
 		// Either nothing settled yet, or it has already been paid. Those are
 		// different situations and telling them apart matters.
@@ -130,8 +151,14 @@ func (s *Server) handleHold(w http.ResponseWriter, r *http.Request, key *account
 	}
 	writeJSONResponse(w, map[string]any{
 		"job": job, "held": n,
-		"status": "payment is frozen and a person will look at this",
-		"note":   "write to support@lamdis.ai with the job id if you do not hear back",
+		"status":     "payment is frozen while this is decided",
+		"decided_by": until.Format(time.RFC3339),
+		"decided_by_whom": "a panel of people who are shown what was agreed and " +
+			"what was submitted, and who are not you and not us",
+		"if_not_decided": "if it is not decided by then the money goes to the " +
+			"worker. An objection nobody carries through is not a finding, and " +
+			"they should not fund the wait",
+		"note": "write to support@lamdis.ai with the job id if you do not hear back",
 	})
 }
 

@@ -492,6 +492,9 @@ type Board struct {
 	// kill a job: claim it, never submit, and the buyer's money sits locked
 	// until the listing dies of old age.
 	leases map[string]map[string]time.Time
+	// rejected counts evidence refused as fabricated, which is not the same
+	// as work that failed. See assurance.go.
+	rejected map[string]int
 	// abandoned counts seats a worker let lapse. Taking work and dropping it
 	// costs the buyer a day and the exchange its credibility, so it has to
 	// cost the worker something too.
@@ -571,6 +574,7 @@ func NewBoard(caps *Capabilities) *Board {
 		leases:    map[string]map[string]time.Time{},
 		done:      map[string]map[string]map[int]bool{},
 		abandoned: map[string]int{},
+		rejected:  map[string]int{},
 		completed: map[string]int{},
 		coolUntil: map[string]time.Time{},
 		owner:     map[string]string{},
@@ -605,6 +609,10 @@ func (b *Board) Post(l *Listing) (err error) {
 		return err
 	}
 	if err := l.ValidateBrief(); err != nil {
+		return err
+	}
+	// A job too big to settle on one photograph has to say how it settles.
+	if err := RequireStaging(l); err != nil {
 		return err
 	}
 	switch l.Kind {
@@ -802,6 +810,18 @@ func (b *Board) Claim(job, client string) (secret string, l *Listing, err error)
 		}
 		return "", nil, fmt.Errorf(
 			"board: this job needs a stage plan from you before it can start")
+	}
+	// What this account has earned the right to have riding on unfinished work.
+	//
+	// Checked after the more specific refusals, so somebody blocked by a
+	// dependency is told that rather than told about their limit, because it is the only moment that
+	// matters: after this the buyer's money is committed and somebody is on
+	// their way. A new account taking one expensive job and vanishing is the
+	// whole attack, and no amount of looking at the photograph afterwards
+	// addresses it. See assurance.go.
+	if err := CheckExposure(b.standingLocked(client),
+		b.exposureLocked(client), item.AtRiskMinor()); err != nil {
+		return "", nil, fmt.Errorf("board: %w", err)
 	}
 	// What the buyer insists on before anybody sets foot on their property.
 	if item.Requires != nil && b.Suppliers != nil {

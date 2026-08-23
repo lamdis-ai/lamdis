@@ -48,7 +48,7 @@ func TestAHoldOutlastsTheWindow(t *testing.T) {
 	now := time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
 	h := NewHoldbacks("")
 	h.Add("do-1", "worker", 5000, "USD", now, 24*time.Hour)
-	h.Hold("do-1", "the gutter is still full at the north end")
+	h.Hold("do-1", "the gutter is still full at the north end", now.Add(DisputeWindow))
 
 	for _, at := range []time.Time{now, now.Add(48 * time.Hour), now.Add(30 * 24 * time.Hour)} {
 		if got := h.Available("worker", at); got != 0 {

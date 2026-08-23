@@ -47,6 +47,10 @@ func TestDirectedWorkReachesOnlyTheNamedVendor(t *testing.T) {
 	caps.Set("acme", takes)
 	caps.Set("stranger", takes)
 
+	// An approved vendor is a business the buyer already works with, so give
+	// them the record that implies.
+	b.SeedStanding("acme", 20, 0)
+	b.SeedStanding("stranger", 20, 0)
 	if _, _, err := b.Claim("hvac-214", "stranger"); err == nil {
 		t.Fatal("a stranger took work assigned to somebody else's vendor")
 	}

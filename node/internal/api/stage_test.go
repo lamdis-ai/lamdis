@@ -46,6 +46,9 @@ func TestALongJobKeepsItsLease(t *testing.T) {
 	if err := b.Post(job); err != nil {
 		t.Fatal(err)
 	}
+	if err := b.SeedVetted("calder"); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := b.Claim("drive-1", "calder"); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +91,9 @@ func TestStagesRunInOrderAndHoldTheSeat(t *testing.T) {
 	if err := b.Post(pavingJob(now)); err != nil {
 		t.Fatal(err)
 	}
+	if err := b.SeedVetted("calder"); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := b.Claim("drive-1", "calder"); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +131,12 @@ func TestProgressKeepsTheLeaseAlive(t *testing.T) {
 	if err := b.Post(job); err != nil {
 		t.Fatal(err)
 	}
-	b.Claim("drive-1", "calder")
+	if err := b.SeedVetted("calder"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := b.Claim("drive-1", "calder"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Seven hours in they finish the materials stage.
 	at := now.Add(7 * time.Hour)

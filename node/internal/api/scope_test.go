@@ -258,6 +258,9 @@ func TestSupplierProposesTheStages(t *testing.T) {
 	if err := b.Post(l); err != nil {
 		t.Fatalf("post: %v", err)
 	}
+	if err := b.SeedVetted("calder"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := b.PlaceBid("drive-1", "calder", 550000, "USD", "", now); err != nil {
 		t.Fatalf("bid: %v", err)
 	}
@@ -329,6 +332,7 @@ func TestBuyerPlannedJobsAreUnchanged(t *testing.T) {
 	if err := b.Post(l); err != nil {
 		t.Fatalf("post: %v", err)
 	}
+	b.SeedStanding("crew", 20, 0)
 	if _, _, err := b.Claim("sweep-1", "crew"); err != nil {
 		t.Fatalf("a buyer-staged job was refused: %v", err)
 	}

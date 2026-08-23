@@ -31,10 +31,15 @@ type Holdback struct {
 	// ReleaseAt is when this may be swept. Moved out by a buyer's hold and
 	// brought forward when a buyer says they are happy.
 	ReleaseAt time.Time `json:"release_at"`
-	// Held is a buyer objecting. Nothing releases while it is true, however
-	// long ago the work was done.
+	// Held is a buyer objecting. Nothing releases while it is true — but it
+	// is no longer true forever: see HeldUntil.
 	Held   bool   `json:"held,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// HeldUntil is the date by which the objection must have been decided.
+	// Past it, the money goes to the worker. An objection nobody carried
+	// through is not a finding, and the worker should not fund the buyer's
+	// silence.
+	HeldUntil time.Time `json:"held_until,omitempty"`
 	// Paid marks it swept, so it is not counted twice.
 	Paid bool `json:"paid,omitempty"`
 }
@@ -127,7 +132,24 @@ func (h *Holdbacks) MarkPaid(person string, now time.Time) {
 }
 
 // Hold freezes everything settled on a job. Called when a buyer objects.
-func (h *Holdbacks) Hold(job, reason string) int {
+//
+// A hold now has a deadline, and that is the whole point of the change.
+//
+// Before this, Held was set and nothing in the system ever cleared it. A buyer
+// could type any sentence at all into the reason and the worker's money
+// stopped, permanently, with no adjudication, no expiry, and no route for the
+// worker to do anything about it. Somebody could do a thousand dollars of work
+// that passed every check the exchange has and be told "not good enough" by
+// the person who owed them, and that was the end of it.
+//
+// That is a worse failure than the fraud everybody worries about, because it
+// needs no skill and no forgery — just the willingness to say no. An exchange
+// that lets the paying side do that is not neutral, and no amount of
+// verification on the other side makes up for it.
+//
+// So: the objection has to be decided by somebody who is not the buyer, and it
+// has to be decided by a date. See dispute.go.
+func (h *Holdbacks) Hold(job, reason string, until time.Time) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	n := 0
@@ -135,11 +157,37 @@ func (h *Holdbacks) Hold(job, reason string) int {
 		if e.Job == job && !e.Paid {
 			e.Held = true
 			e.Reason = reason
+			e.HeldUntil = until
 			n++
 		}
 	}
 	h.saveLocked()
 	return n
+}
+
+// ExpireHolds releases anything whose objection was never carried through.
+//
+// Called on the same timer that sweeps everything else. A buyer who objects
+// and then does nothing has not made a case; leaving the money frozen on the
+// strength of an unexamined sentence is the failure this exists to prevent.
+func (h *Holdbacks) ExpireHolds(now time.Time) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var freed []string
+	for _, e := range h.all {
+		if !e.Held || e.Paid || e.HeldUntil.IsZero() || now.Before(e.HeldUntil) {
+			continue
+		}
+		e.Held = false
+		e.Reason = ""
+		e.HeldUntil = time.Time{}
+		e.ReleaseAt = now
+		freed = append(freed, e.Job)
+	}
+	if len(freed) > 0 {
+		h.saveLocked()
+	}
+	return freed
 }
 
 // Release lets a job's earnings go now, because the buyer said they are happy.
@@ -155,6 +203,7 @@ func (h *Holdbacks) Release(job string, now time.Time) int {
 		if e.Job == job && !e.Paid {
 			e.Held = false
 			e.Reason = ""
+			e.HeldUntil = time.Time{}
 			e.ReleaseAt = now
 			n++
 		}

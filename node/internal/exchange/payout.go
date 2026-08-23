@@ -599,6 +599,17 @@ func (s *Server) StartPayoutSweeper(ctx context.Context, every time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				// Objections that were never carried through.
+				//
+				// Runs before the payout sweep, so money freed here goes out on
+				// the same pass rather than waiting another hour. A worker owed
+				// a month's income should not wait on our scheduling.
+				if s.Holdbacks != nil {
+					if freed := s.Holdbacks.ExpireHolds(s.now()); len(freed) > 0 {
+						log.Printf("disputes   %d objection(s) lapsed undecided; "+
+							"earnings released to the worker: %v", len(freed), freed)
+					}
+				}
 				if n, total := s.SweepPayouts(ctx); n > 0 {
 					log.Printf("payout: sent %d payment(s) totalling %d minor units", n, total)
 				}

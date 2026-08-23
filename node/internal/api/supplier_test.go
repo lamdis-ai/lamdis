@@ -195,6 +195,8 @@ func TestATechnicianStillHoldsTheirOwnWork(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	b.SeedStanding("tech_ana", 20, 0)
+	b.SeedStanding("tech_ben", 20, 0)
 	if _, _, err := b.Claim("roof", "tech_ana"); err != nil {
 		t.Fatalf("first crew: %v", err)
 	}
@@ -255,6 +257,7 @@ func TestLicensedWorkNeedsAVerifiedLicence(t *testing.T) {
 	sups.Upsert(firm, Supplier{Kind: KindCompany, LegalName: "Northline LLC",
 		Licences: []Licence{{Skill: "hvac", Number: "M-4471", State: "CA",
 			Expires: now.AddDate(1, 0, 0)}}})
+	b.SeedStanding(firm, 20, 0)
 	if _, _, err := b.Claim("hvac-1", firm); err == nil {
 		t.Fatal("a claimed but unverified licence was accepted")
 	}

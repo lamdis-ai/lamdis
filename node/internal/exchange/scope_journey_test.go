@@ -17,6 +17,12 @@ import (
 // scope, bundle it, win it, propose the schedule, and be held to the order.
 func TestPavingCompanyCanFulfilAThreePartScope(t *testing.T) {
 	h := newScopeHarness(t)
+	// Calder Paving is a checked business. A fourteen-thousand-dollar scope is
+	// exactly the work that should require that, and a stranger should not be
+	// able to take it — see api/assurance.go.
+	if err := h.board.SeedVetted("calder-paving"); err != nil {
+		t.Fatal(err)
+	}
 
 	// 1. The homeowner's agent posts the scope as one project.
 	project := h.openProject(t, "Driveways and barn slab", 1600000)
