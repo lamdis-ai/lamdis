@@ -53,16 +53,28 @@ const boardBody = `
     <span class="label grp">Operation</span>
     <a href="/console">Earnings</a>
     <a href="/console#capacity">Capacity</a>
+    <a href="/console#larger">Larger jobs</a>
     <a href="/console#integration">Integration</a>
   </nav>
   <main class="main">
     <h1>Queue</h1>
-    <p class="lead">Work dispatched by agents that you are eligible for.</p>
+    <p class="lead">What is out there, what it pays, and what you have on.</p>
     <div class="strip" id="strip"></div>
-    <div id="holding"></div>
-    <h2>Available now</h2>
+
+    <!-- Summary before detail: the four numbers that decide what to do next. -->
+    <dl class="glance" id="glance"></dl>
+
     <div id="terms-line"></div>
-    <div class="rows" id="rows"><div class="empty">Loading&hellip;</div></div>
+
+    <nav class="tabs" role="tablist" id="tabs">
+      <button class="tab" role="tab" aria-selected="true" data-view="mine">
+        My work<span class="tn" id="t-mine"></span></button>
+      <button class="tab" role="tab" aria-selected="false" data-view="open">
+        Open work<span class="tn" id="t-open"></span></button>
+    </nav>
+
+    <div id="holding"></div>
+    <div class="rows" id="rows" hidden><div class="empty">Loading&hellip;</div></div>
     <div id="verify"></div>
     <div class="err" id="verify-err"></div>
   </main>
@@ -100,7 +112,7 @@ function kindLabel(k) {
   return k === "do" ? "Act" : (k === "review" ? "Verify" : "Check");
 }
 
-var WORK = [], WAITING = 0, HOLDING = [];
+var WORK = [], WAITING = 0, HOLDING = [], ME = null;
 
 function renderHealth() {
   var el = document.getElementById("h-text");
@@ -135,27 +147,156 @@ function renderStrip() {
   }
 }
 
+// renderGlance is the four numbers somebody opens this page to see.
+//
+// Summary before detail. "Pending" used to be one figure covering three
+// different situations — coming, waiting out a window, objected to — and which
+// one you are in is the entire question. Room left is here because the other
+// half of "what can I do next" is what you are still allowed to take on.
+function renderGlance() {
+  var host = document.getElementById("glance");
+  if (!ME) { host.innerHTML = ""; return; }
+  var cur = ME.currency || "USD";
+  var cells = [
+    {k: "Clear to send", v: money(ME.clear_minor || 0, cur), cls: "money"},
+    {k: "Held", v: money(ME.held_minor || 0, cur), cls: (ME.held_minor > 0 ? "wait" : "")},
+    {k: "In flight", v: String(HOLDING.length), sub: HOLDING.length === 1 ? "job" : "jobs"},
+    {k: "Room left", v: money(ME.room_minor || 0, cur),
+     sub: "of " + money(ME.ceiling_minor || 0, cur)}
+  ];
+  host.innerHTML = cells.map(function (c) {
+    return '<div class="g ' + (c.cls || "") + '">' +
+      '<dt>' + esc(c.k) + '</dt>' +
+      '<dd>' + esc(c.v) + (c.sub ? '<small>' + esc(c.sub) + '</small>' : "") + '</dd>' +
+    '</div>';
+  }).join("");
+}
+
+// stageRail draws the plan as segments weighted by what each pays.
+//
+// Progress, not a schedule. There are no dates on it and there is not going to
+// be: what somebody needs from this is which piece is in front of them and
+// what it is worth, and a timeline would be answering a question nobody asked.
+function stageRail(h) {
+  if (!h.stages || !h.stages.length) { return ""; }
+  var done = h.stage_done || [];
+  var segs = h.stages.map(function (st, i) {
+    var cls = done[i] ? "paid" : (i === h.next_stage ? "now" : "");
+    return '<div class="seg ' + cls + '" style="flex:' +
+      Math.max(1, st.pay_minor || 1) + '"></div>';
+  }).join("");
+  var keys = h.stages.map(function (st, i) {
+    var state = done[i] ? "paid" : (i === h.next_stage ? "now" : "");
+    return '<span class="' + state + '"><b>' + esc(st.name) + '</b> ' +
+      money(st.pay_minor || 0, h.currency || "USD") +
+      (state ? " " + state : "") + '</span>';
+  }).join("");
+  return '<div class="stagebar">' + segs + '</div>' +
+    '<div class="stagekey">' + keys + '</div>';
+}
+
+// renderHolding is "My work": what you are on, what stage, what is owed.
 function renderHolding() {
   var host = document.getElementById("holding");
   document.getElementById("n-flight").textContent = HOLDING.length || "";
-  if (!HOLDING.length) { host.innerHTML = ""; return; }
-  host.innerHTML = '<h2 id="holding">In flight</h2>' + HOLDING.map(function (h) {
+  document.getElementById("t-mine").textContent = HOLDING.length || "";
+  if (!HOLDING.length) {
+    host.innerHTML = '<div class="empty">Nothing on at the moment. ' +
+      'Open work is on the other tab.</div>';
+    return;
+  }
+  host.innerHTML = '<div class="rows">' + HOLDING.map(function (h) {
+    var blocked = (h.blocked_by || []).length > 0;
     var mins = Math.max(0, Math.round((new Date(h.expires) - new Date()) / 60000));
-    return '<div class="holding">' +
-      '<span class="chip ok">Yours</span>' +
-      '<h3>' + esc(h.title) + '</h3>' +
-      '<p class="clock">held for another ' + mins + ' min' +
-        (h.where ? ' &middot; ' + esc(h.where) : '') + '</p>' +
-      '<div class="acts">' +
-        '<a class="btn go" href="' + esc(h.resume) + '">Carry on</a>' +
-        '<button class="btn" data-give="' + esc(h.job) + '">Give it back</button>' +
+    var staged = h.stages && h.stages.length;
+    var next = staged && h.next_stage >= 0 ? h.stages[h.next_stage] : null;
+
+    var facts = [];
+    if (blocked) { facts.push('<span class="chip wait">Waiting on other work</span>'); }
+    else if (staged) {
+      facts.push('<span class="chip go">Stage ' + (h.next_stage + 1) +
+        ' of ' + h.stages.length + '</span>');
+    } else {
+      facts.push('<span class="chip go">Yours for ' + mins + ' min</span>');
+    }
+    if (h.where) { facts.push(esc(h.where)); }
+    if (h.project) {
+      facts.push(esc(h.project.position) + ' of ' + esc(h.project.jobs) +
+        (h.project.one_visit ? " &middot; one address" : ""));
+    }
+
+    return '<div class="job ' + (blocked ? "wait" : "go") + '" data-job="' + esc(h.job) + '">' +
+      '<button class="jrow" data-open="' + esc(h.job) + '">' +
+        '<div class="jbody">' +
+          '<p class="jt">' + esc(h.title) + '</p>' +
+          '<div class="m">' + facts.join(' <span class="dot">&middot;</span> ') + '</div>' +
+          stageRail(h) +
+        '</div>' +
+        '<div class="amt">' +
+          '<div class="n' + (next ? "" : " quiet") + '">' +
+            money(next ? next.pay_minor : h.pay_minor, h.currency || "USD") + '</div>' +
+          '<div class="s">' + (next ? "next stage" : "on completion") + '</div>' +
+        '</div>' +
+      '</button>' +
+      '<div class="jopen" id="o-' + esc(h.job) + '">' +
+        '<div class="jgrid">' +
+          (next
+            ? '<div><h4>What proves this stage</h4><p class="fx">' +
+                esc(next.deliverable) + '</p></div>'
+            : '') +
+          (blocked
+            ? '<div><h4>Why it cannot start</h4><p class="fx">' +
+                esc(h.blocked_by.join(", ")) + ' has to be finished and accepted first. ' +
+                'Nobody else can take this in the meantime &mdash; it is yours.</p></div>'
+            : '') +
+          agreedBlock(h) +
+        '</div>' +
+        '<div class="acts">' +
+          (blocked ? '' : '<a class="btn go" href="' + esc(h.resume) + '">Carry on</a>') +
+          '<button class="btn" data-give="' + esc(h.job) + '">Give it back</button>' +
+        '</div>' +
+        '<div class="err" id="g-' + esc(h.job) + '"></div>' +
       '</div>' +
-      '<div class="err" id="g-' + esc(h.job) + '"></div>' +
     '</div>';
-  }).join("");
+  }).join("") + '</div>';
 
   host.querySelectorAll("button[data-give]").forEach(function (b) {
-    b.addEventListener("click", function () { giveBack(b, b.getAttribute("data-give")); });
+    b.addEventListener("click", function (e) {
+      e.stopPropagation();
+      giveBack(b, b.getAttribute("data-give"));
+    });
+  });
+  wireRows(host);
+  // The panel was just rebuilt; keep whichever tab is selected showing.
+  var sel = document.querySelector('#tabs .tab[aria-selected="true"]');
+  if (sel) {
+    host.hidden = sel.dataset.view !== "mine";
+    document.getElementById("rows").hidden = sel.dataset.view === "mine";
+  }
+}
+
+// agreedBlock shows the figures the work is judged against.
+function agreedBlock(h) {
+  if (!h.agreed || !h.agreed.length) { return ""; }
+  return '<div><h4>Agreed when you bid</h4>' + h.agreed.map(function (a) {
+    return '<p class="fx"><b>' + esc(a.name) + '</b> ' + esc(a.value) + ' ' +
+      '<span class="chip ' + (a.firm ? "go" : "wait") + '">' +
+      (a.firm ? "firm" : "provisional") + '</span></p>';
+  }).join("") +
+  '<p class="fn">Provisional means you said you would measure and requote. ' +
+    'Do that before the stage, not after.</p></div>';
+}
+
+// wireRows makes a row open in place. One at a time, so the page stays short
+// enough to scan — which is the complaint this whole view answers.
+function wireRows(host) {
+  host.querySelectorAll("button[data-expand]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var job = b.parentElement, list = job.parentElement;
+      var was = job.classList.contains("on");
+      list.querySelectorAll(".job.on").forEach(function (o) { o.classList.remove("on"); });
+      if (!was) { job.classList.add("on"); }
+    });
   });
 }
 
@@ -184,6 +325,7 @@ function termsLine() {
 function renderQueue() {
   var host = document.getElementById("rows");
   document.getElementById("n-queue").textContent = WORK.length || "";
+  document.getElementById("t-open").textContent = WORK.length || "";
   var ready = signedIn();
 
   document.getElementById("terms-line").innerHTML = termsLine();
@@ -257,11 +399,25 @@ function renderQueue() {
           ? '<span class="net">' + money(net, w.currency) + ' to you</span>'
           : "") + '</span>';
 
-    var action = bidding
-      ? '<button class="btn sm" data-open="' + esc(w.job) + '">Bid</button>'
-      : '<button class="btn sm" data-job="' + esc(w.job) + '"' + (ready ? "" : " disabled") + '>Take</button>';
+    // Work this account cannot carry yet, said with the number rather than
+    // hidden. Somebody looking at a job they cannot take is owed the reason
+    // and the figure, not a missing row.
+    var atRisk = (w.stages && w.stages.length)
+      ? w.stages.reduce(function (m, st) { return Math.max(m, st.pay_minor || 0); }, 0)
+      : (w.pay_minor || w.max_bid_minor || 0);
+    var overRoom = ME && ME.room_minor !== undefined && !w.practice &&
+      atRisk > ME.room_minor;
+    if (overRoom) {
+      facts.unshift('<span class="chip">Above your room</span>');
+    }
 
-    return '<div class="r">' +
+    var action = bidding
+      ? '<button class="btn sm" data-open="' + esc(w.job) + '"' +
+        (overRoom ? " disabled" : "") + '>Bid</button>'
+      : '<button class="btn sm" data-job="' + esc(w.job) + '"' +
+        (ready && !overRoom ? "" : " disabled") + '>Take</button>';
+
+    return '<div class="r' + (overRoom ? " shut" : "") + '">' +
       '<div class="grow">' +
         '<div class="t"><span class="chip hot">' + kindLabel(w.kind) + '</span>' +
           esc(w.kind === "do" && w.instructions ? w.instructions : w.title) + '</div>' +
@@ -273,6 +429,11 @@ function renderQueue() {
         (w.brief ? '<div class="bf">' + esc(w.brief) + '</div>' : "") +
         siteShots(w) +
         (w.withheld ? '<div class="wh">' + esc(w.withheld) + '</div>' : "") +
+        (overRoom
+          ? '<div class="wh">This would put ' + money(atRisk, w.currency) +
+            ' on unfinished work and you have ' + money(ME.room_minor, ME.currency || "USD") +
+            ' of room. Finish something in flight, or take something smaller.</div>'
+          : "") +
         '<div class="bid" id="bid-' + esc(w.job) + '" hidden>' +
           '<div class="bid-row">' +
             '<span class="cur">$</span>' +
@@ -436,15 +597,49 @@ function giveBack(button, job) {
        "/v1/workers/giveback/" + encodeURIComponent(job));
 }
 
+// The two views, switched without a round trip. Somebody checking whether
+// they have been paid should not have to reload the board to see their work.
+function wireTabs() {
+  var mine = document.getElementById("holding");
+  var open = document.getElementById("rows");
+  document.querySelectorAll("#tabs .tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      document.querySelectorAll("#tabs .tab").forEach(function (t) {
+        t.setAttribute("aria-selected", String(t === tab));
+      });
+      var wantMine = tab.dataset.view === "mine";
+      mine.hidden = !wantMine;
+      open.hidden = wantMine;
+      document.getElementById("terms-line").hidden = wantMine;
+    });
+  });
+  // Somebody arriving with nothing on wants the open board, not an empty
+  // panel telling them so.
+  if (!HOLDING.length) {
+    var openTab = document.querySelector('#tabs .tab[data-view="open"]');
+    if (openTab) { openTab.click(); }
+  }
+}
+
 function load() {
   if (signedIn()) {
+    // What this account is owed and what it may still take on. Both halves of
+    // "what do I do next", and neither was on this page before.
+    workerHeaders("GET", "/v1/me")
+      .then(function (h) { return fetch("/v1/me", {headers: h}); })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (m) { ME = m; renderGlance(); renderQueue(); })
+      .catch(function () { ME = null; renderGlance(); });
     workerHeaders("GET", "/v1/workers/holdings")
       .then(function (h) { return fetch("/v1/workers/holdings", {headers: h}); })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (b) { HOLDING = (b && b.holding) || []; renderHolding(); })
+      .then(function (b) {
+        HOLDING = (b && b.holding) || [];
+        renderHolding(); renderGlance();
+      })
       .catch(function () { HOLDING = []; renderHolding(); });
   } else {
-    HOLDING = []; renderHolding();
+    HOLDING = []; renderHolding(); renderGlance();
   }
 
   (signedIn()
@@ -469,8 +664,11 @@ function load() {
 session().then(function () {
   renderHealth();
   renderStrip();
+  wireTabs();
   load();
 });
-setInterval(load, 20000);
+// Re-armed after every refresh, because both panels are rebuilt from scratch
+// and the listeners on the old nodes go with them.
+setInterval(function () { load(); }, 20000);
 </script>
 `

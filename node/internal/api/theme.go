@@ -164,6 +164,75 @@ h1 { margin: 0 0 .3rem; font: 700 1.45rem/1.15 var(--sans); letter-spacing: -.03
 .bf { font-size: .8rem; color: var(--ink-3); margin-top: .3rem; font-style: italic;
       border-left: 2px solid var(--rule-2); padding-left: .55rem; }
 .wh { font-size: .78rem; color: var(--warn); margin-top: .3rem; }
+/* The queue, rebuilt. Summary first, state read from the stripe before any
+   word is read, money right-aligned in tabular figures, and stages shown as
+   what they are — money-weighted progress, not a schedule. */
+.glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+  margin: 0 0 1.25rem; border-radius: 3px; overflow: hidden; }
+.glance .g { background: var(--panel); padding: .8rem .85rem; }
+.glance dt { font: 600 .64rem/1 var(--sans); text-transform: uppercase;
+  letter-spacing: .09em; color: var(--ink-3); margin-bottom: .4rem; }
+.glance dd { margin: 0; font: 600 1.3rem/1 var(--mono); font-variant-numeric: tabular-nums; }
+.glance dd small { font: 500 .7rem/1 var(--mono); color: var(--ink-3); margin-left: .3rem; }
+.glance .money dd { color: var(--gold); }
+.glance .wait dd { color: var(--warn); }
+
+.tabs { display: flex; gap: .15rem; margin: 0 0 1rem; border-bottom: 1px solid var(--rule); }
+.tabs .tab { appearance: none; background: none; border: 0;
+  border-bottom: 2px solid transparent; color: var(--ink-3);
+  font: 600 .85rem/1 var(--sans); padding: .55rem .75rem; cursor: pointer; }
+.tabs .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--gold); }
+.tabs .tab:hover { color: var(--ink-2); }
+.tabs .tab:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.tabs .tn { font: 500 .72rem/1 var(--mono); color: var(--ink-3); margin-left: .35rem; }
+
+.job { border-bottom: 1px solid var(--rule); }
+.job:last-child { border-bottom: 0; }
+.jrow { display: flex; align-items: flex-start; gap: .9rem; width: 100%; text-align: left;
+  padding: .8rem 1rem .8rem .75rem; background: none; color: inherit; font: inherit;
+  border: 0; border-left: 3px solid var(--rule-2); cursor: pointer; }
+.jrow:hover { background: var(--panel); }
+.jrow:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.job.go > .jrow { border-left-color: var(--green); }
+.job.wait > .jrow { border-left-color: var(--warn); }
+.jbody { flex: 1; min-width: 0; }
+.jt { font-weight: 600; margin: 0 0 .2rem; line-height: 1.35; }
+.job .amt { text-align: right; flex: none; min-width: 6.2rem; }
+.job .amt .n { font: 600 1.02rem/1.2 var(--mono); font-variant-numeric: tabular-nums;
+  color: var(--gold); }
+.job .amt .n.quiet { color: var(--ink-2); }
+.job .amt .s { font: 500 .68rem/1.4 var(--mono); color: var(--ink-3); margin-top: .12rem; }
+
+/* Named stagebar, not rail. .rail is the navigation sidebar above, and the
+   stage bar silently inherited its background, padding and border — so it
+   rendered as an invisible gap. Two unrelated things with one class name is
+   how a stylesheet quietly cancels itself. */
+.stagebar { display: flex; gap: 2px; margin-top: .5rem; }
+.stagebar .seg { height: 5px; border-radius: 1px; background: var(--panel-2); }
+.stagebar .seg.paid { background: var(--green); }
+.stagebar .seg.now { background: var(--gold); }
+.stagekey { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .35rem;
+  font: 500 .7rem/1.4 var(--mono); color: var(--ink-3); }
+.stagekey b { color: var(--ink-3); font-weight: 500; }
+.stagekey .paid b, .stagekey .paid { color: var(--green); }
+.stagekey .now b, .stagekey .now { color: var(--gold); }
+
+.jopen { display: none; padding: 0 1rem 1rem 1.75rem; }
+.job.on .jopen { display: block; }
+.job.on > .jrow { background: var(--panel); }
+.jgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem; padding-top: .85rem; border-top: 1px solid var(--rule); }
+.jgrid h4 { margin: 0 0 .45rem; font: 600 .66rem/1 var(--sans); text-transform: uppercase;
+  letter-spacing: .09em; color: var(--ink-3); }
+.fx { font-size: .86rem; color: var(--ink-2); margin: 0 0 .35rem; }
+.fx b { color: var(--ink); font-weight: 600; }
+.fn { font: 500 .72rem/1.5 var(--mono); color: var(--ink-3); margin: .5rem 0 0; }
+
+/* A job this account cannot carry yet, greyed rather than hidden. */
+.r.shut { opacity: .55; }
+.r.shut .amt { color: var(--ink-3); }
+
 /* What the buyer supplied so the work can be priced and the place found. */
 .shots { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .55rem; }
 .ref { margin: 0; width: 7rem; }

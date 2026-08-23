@@ -1336,6 +1336,25 @@ type Holding struct {
 	Expires time.Time `json:"expires"`
 	// Resume is the link back into the work, capability and all.
 	Resume string `json:"resume"`
+	// PayMinor is what the whole job pays, and Currency what in.
+	PayMinor int64  `json:"pay_minor,omitempty"`
+	Currency string `json:"currency,omitempty"`
+	// Stages is the plan, so the page can show which piece is in front of
+	// them rather than one undifferentiated "in flight". A person part-way
+	// through a three-day job wants to know what is next and what it pays.
+	Stages []Stage `json:"stages,omitempty"`
+	// StageDone marks the pieces already evidenced and paid.
+	StageDone []bool `json:"stage_done,omitempty"`
+	// NextStage is the index of the piece in front of them, or -1 when the
+	// whole job is finished.
+	NextStage int `json:"next_stage"`
+	// BlockedBy names anything that has to happen before this can start.
+	BlockedBy []string `json:"blocked_by,omitempty"`
+	// Agreed is what the winning bid said it priced on, carried so the crew
+	// can read the figures the work is judged against.
+	Agreed []Assumption `json:"agreed,omitempty"`
+	// Project is the wider scope this belongs to, if any.
+	Project *ProjectBrief `json:"project,omitempty"`
 }
 
 // HeldBy returns the work a person is holding, with a way back into each.
@@ -1373,11 +1392,31 @@ func (b *Board) HeldBy(worker string) []Holding {
 		if l.Kind == KindReview {
 			page = "/r/"
 		}
-		out = append(out, Holding{
+		h := Holding{
 			Job: job, Kind: l.Kind, Title: l.Title, Where: l.Where,
-			Expires: b.leases[job][worker],
-			Resume:  page + job + "#" + secret,
-		})
+			Expires:  b.leases[job][worker],
+			Resume:   page + job + "#" + secret,
+			PayMinor: l.PayMinor, Currency: l.Currency,
+			Stages: l.Stages, Agreed: l.Agreed,
+			NextStage: -1,
+			BlockedBy: b.blockedLocked(l),
+		}
+		if l.Staged() {
+			done := b.done[job][worker]
+			h.StageDone = make([]bool, len(l.Stages))
+			for i := range l.Stages {
+				h.StageDone[i] = done[i]
+				if !done[i] && h.NextStage < 0 {
+					h.NextStage = i
+				}
+			}
+		} else {
+			h.NextStage = 0
+		}
+		if l.ProjectID != "" {
+			h.Project = b.briefLocked(l.ProjectID, job)
+		}
+		out = append(out, h)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Expires.Before(out[j].Expires) })
 	return out

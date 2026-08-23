@@ -32,6 +32,10 @@ type Console struct {
 	History func(worker string) []WorkRecord
 	// Bids lists their open offers, so a bid does not disappear once placed.
 	Bids func(worker string) []OpenBid
+	// Frozen reports earnings a buyer has objected to and the date each must
+	// be decided by. Nil means the exchange keeps no holdbacks, and the figure
+	// is reported as zero rather than guessed at.
+	Frozen func(worker string) (heldMinor, clearMinor int64)
 	// PayoutThresholdMinor is what must accumulate before a transfer is made.
 	PayoutThresholdMinor int64
 	Now                  func() time.Time
@@ -139,6 +143,25 @@ func (c *Console) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pending := earned - paid
+	// Pending is one number covering three different situations, and the
+	// difference is the whole question somebody has when they look at this
+	// page: is my money coming, is it waiting out a window, or has somebody
+	// objected to it. Split so the page can say which.
+	var held, clear int64
+	if c.Frozen != nil {
+		held, clear = c.Frozen(worker.ID)
+	}
+	// What this account may still take on, which is the other half of the
+	// answer to "what can I do next". See assurance.go.
+	var ceiling, exposure int64
+	if c.Board != nil {
+		ceiling = ValueCeiling(c.Board.StandingFor(worker.ID))
+		exposure = c.Board.ExposureOf(worker.ID)
+	}
+	room := ceiling - exposure
+	if room < 0 {
+		room = 0
+	}
 	// The single most useful sentence on the page: why the money has not
 	// arrived. Every branch here is a real state somebody will be in.
 	var blocked string
@@ -178,6 +201,11 @@ func (c *Console) handleMe(w http.ResponseWriter, r *http.Request) {
 		"earned_minor":     earned,
 		"paid_minor":       paid,
 		"pending_minor":    pending,
+		"held_minor":       held,
+		"clear_minor":      clear,
+		"ceiling_minor":    ceiling,
+		"exposure_minor":   exposure,
+		"room_minor":       room,
 		"currency":         currency,
 		"payout":           payout,
 		"payout_threshold": c.PayoutThresholdMinor,

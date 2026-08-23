@@ -412,6 +412,7 @@ func (s *Server) Handler() *http.ServeMux {
 		},
 		History:              s.historyFor,
 		Bids:                 s.bidsFor,
+		Frozen:               s.frozenFor,
 		PayoutThresholdMinor: PayoutThresholdMinor,
 	}
 	console.Register(mux)
@@ -1697,4 +1698,25 @@ func verificationBlock(l *api.Listing, subs []api.Submission) map[string]any {
 			"inferred": mark.Derived}
 	}
 	return out
+}
+
+// frozenFor splits what a worker is owed into money somebody has objected to
+// and money that is simply waiting for the next sweep.
+//
+// One "pending" figure covers three different situations and a person looking
+// at this page wants to know which of them they are in: is it coming, is it
+// waiting out a window, or has somebody objected. Guessing between those is
+// how a page ends up reassuring somebody whose money is frozen.
+func (s *Server) frozenFor(worker string) (heldMinor, clearMinor int64) {
+	if s.Holdbacks == nil {
+		return 0, 0
+	}
+	now := s.now()
+	clearMinor = s.Holdbacks.Available(worker, now)
+	for _, h := range s.Holdbacks.Pending(worker, now) {
+		if h.Held {
+			heldMinor += h.AmountMinor
+		}
+	}
+	return heldMinor, clearMinor
 }
