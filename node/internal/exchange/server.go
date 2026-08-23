@@ -429,6 +429,7 @@ func (s *Server) Handler() *http.ServeMux {
 		s.registerQuote(mux)
 		s.registerProjects(mux)
 		s.registerScopeBuyer(mux)
+		s.registerReferences(mux)
 		s.registerBook(mux)
 		mux.HandleFunc("GET /v1/jobs/{job}/evidence", s.withAgent(s.handleJobEvidence))
 		mux.HandleFunc("GET /v1/jobs/{job}/evidence/{sha}", s.withAgent(s.handleEvidenceFile))

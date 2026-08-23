@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -168,4 +169,92 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("no offer ever arrived at the operator's endpoint")
+}
+
+// An auto-accepted offer must carry the capability that claiming it minted.
+//
+// Auto-accept was true and useless. The exchange claimed the job, set
+// AutoAccepted, and threw away the secret Claim returned — so the operator
+// held a seat on work it could not open: the brief needs a capability, the
+// upload needs a capability, and ClaimURL was already spent. A person would
+// have gone looking for support. A fleet has nobody to ask, so it holds the
+// seat until the lease lapses and the job dies in its hands.
+//
+// The assertion is the whole loop, not the field: take the secret out of the
+// offer and prove it authorises this job, because a work_url that does not
+// resolve to a usable capability would satisfy a shallower test and still
+// strand the fleet.
+func TestAutoAcceptedOfferCarriesAWorkingCapability(t *testing.T) {
+	var (
+		mu  sync.Mutex
+		got Offer
+	)
+	endpoint := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		json.Unmarshal(body, &got)
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer endpoint.Close()
+
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	caps := NewCapacities()
+	capabilities := NewCapabilities()
+	board := NewBoard(capabilities)
+	board.Now = func() time.Time { return now }
+	board.Capacities = caps
+	board.ClaimTTL = time.Hour
+
+	const fleet = "fleet-1"
+	caps.Set(fleet, Capacity{
+		MaxConcurrent: 4, RangeMiles: 25, Accepting: true, AutoAccept: true,
+		Kinds: []string{"observe"},
+		LatE7: E7(37.7749), LonE7: E7(-122.4194),
+		Webhook: endpoint.URL,
+	})
+
+	l := &Listing{
+		Job: "observe-auto", Kind: "observe", Title: "check the gate",
+		Where: "1400 Industrial Way", PayMinor: 1200, Currency: "usd", Slots: 1,
+		LatE7: E7(37.7849), LonE7: E7(-122.4094),
+		Expires: now.Add(6 * time.Hour), Posted: now,
+	}
+
+	d := &Dispatcher{
+		Board: board, Capacities: caps, BaseURL: "https://exchange.example",
+		Now: func() time.Time { return now }, Client: endpoint.Client(),
+		AllowPrivateHosts: true,
+	}
+	board.Announce = func(l *Listing) { d.Announce(context.Background(), l) }
+	if err := board.Post(l); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return got.Job != "" })
+
+	mu.Lock()
+	off := got
+	mu.Unlock()
+
+	if !off.AutoAccepted {
+		t.Fatalf("offer was not auto-accepted")
+	}
+	if off.WorkURL == "" {
+		t.Fatalf("auto-accepted offer carries no work_url — the fleet cannot open the job it now holds")
+	}
+	i := strings.Index(off.WorkURL, "#")
+	if i < 0 {
+		t.Fatalf("work_url %q has no capability fragment", off.WorkURL)
+	}
+	secret := off.WorkURL[i+1:]
+	c, ok := capabilities.Lookup(secret)
+	if !ok {
+		t.Fatalf("the secret in work_url is not a live capability")
+	}
+	if c.Job != l.Job {
+		t.Fatalf("capability is for job %q, want %q", c.Job, l.Job)
+	}
+	if !c.Can(ActionSubmit) {
+		t.Fatalf("capability cannot submit evidence, so the fleet still cannot finish the job")
+	}
 }

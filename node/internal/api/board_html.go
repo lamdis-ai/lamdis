@@ -271,6 +271,7 @@ function renderQueue() {
         // being asked to bid on.
         (w.deliverable ? '<div class="dv">Proof: ' + esc(w.deliverable) + '</div>' : "") +
         (w.brief ? '<div class="bf">' + esc(w.brief) + '</div>' : "") +
+        siteShots(w) +
         (w.withheld ? '<div class="wh">' + esc(w.withheld) + '</div>' : "") +
         '<div class="bid" id="bid-' + esc(w.job) + '" hidden>' +
           '<div class="bid-row">' +
@@ -354,6 +355,29 @@ function takeJob(button, job) {
 // A price on a job whose dimensions nobody has established is a guess, and the
 // argument about it happens on site. Asking here costs one line each and makes
 // the offer mean something.
+// siteShots shows what the buyer supplied so this can be priced.
+//
+// The complaint that produced this: a job could describe four stages of paving
+// and give nothing to price them against — no photograph of the ground, no
+// access, no way to tell on arrival that you are at the right property. The
+// shot marked as the identifier is called out, because that is the one
+// somebody opens standing at the kerb.
+function siteShots(w) {
+  var refs = w.references || [];
+  if (!refs.length) { return ""; }
+  return '<div class="shots">' + refs.map(function (r) {
+    var src = "/v1/jobs/" + encodeURIComponent(w.job) +
+      "/references/" + encodeURIComponent(r.sha256);
+    return '<figure class="ref' + (r.identifies ? " id" : "") + '">' +
+      '<a href="' + src + '" target="_blank" rel="noopener">' +
+        '<img src="' + src + '" alt="' + esc(r.caption || "the site") + '" loading="lazy">' +
+      '</a>' +
+      '<figcaption>' + esc(r.caption || "") +
+        (r.identifies ? '<b>check you are here</b>' : "") + '</figcaption>' +
+    '</figure>';
+  }).join("") + '</div>';
+}
+
 function askUnknowns(w) {
   var us = w.unknowns || [];
   if (!us.length) { return ""; }

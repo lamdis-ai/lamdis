@@ -164,6 +164,15 @@ h1 { margin: 0 0 .3rem; font: 700 1.45rem/1.15 var(--sans); letter-spacing: -.03
 .bf { font-size: .8rem; color: var(--ink-3); margin-top: .3rem; font-style: italic;
       border-left: 2px solid var(--rule-2); padding-left: .55rem; }
 .wh { font-size: .78rem; color: var(--warn); margin-top: .3rem; }
+/* What the buyer supplied so the work can be priced and the place found. */
+.shots { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .55rem; }
+.ref { margin: 0; width: 7rem; }
+.ref img { display: block; width: 100%; aspect-ratio: 4/3; object-fit: cover;
+  border: 1px solid var(--rule-2); border-radius: 3px; background: var(--panel); }
+.ref.id img { border-color: var(--gold); }
+.ref figcaption { font: 500 .68rem/1.35 var(--mono); color: var(--ink-3); margin-top: .25rem; }
+.ref figcaption b { display: block; color: var(--gold); font-weight: 500; }
+
 .unk { margin: .6rem 0 0; padding: .6rem .7rem; background: var(--bg);
        border: 1px solid var(--rule); border-radius: 3px; }
 .unk-h { margin: 0 0 .5rem; font-size: .78rem; color: var(--gold); }

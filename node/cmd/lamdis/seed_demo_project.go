@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"time"
 
 	"github.com/lamdis-ai/lamdis-protocol/node/internal/api"
@@ -39,6 +43,7 @@ func seedDemoProject(srv *exchange.Server) error {
 	pieces := []struct {
 		job, title, detail, deliverable string
 		instructions, brief             string
+		shots                           []shot
 		unknowns                        []api.Unknown
 		dependsOn                       []string
 		ceilingMinor                    int64
@@ -62,6 +67,10 @@ func seedDemoProject(srv *exchange.Server) error {
 				{Name: "slab footprint", Note: "roughly barn-sized; never measured", Unit: "feet"},
 				{Name: "slab thickness", Note: "whatever will take a compact tractor", Unit: "inches"},
 			},
+			shots: []shot{
+				{"the barn, from the yard gate", false, 0},
+				{"the number on the porch post", true, 1},
+			},
 			ceilingMinor: 450000,
 		},
 		{
@@ -75,6 +84,10 @@ func seedDemoProject(srv *exchange.Server) error {
 			deliverable: "Driveway patched and overlaid, apron level, code legible in shot.",
 			brief: "Cracking is worst in the ten feet nearest the road. Owner would " +
 				"rather patch than replace if it will hold five years.",
+			shots: []shot{
+				{"the front drive, cracking near the apron", false, 2},
+				{"the number on the porch post", true, 1},
+			},
 			ceilingMinor: 550000,
 		},
 		{
@@ -92,7 +105,12 @@ func seedDemoProject(srv *exchange.Server) error {
 			unknowns: []api.Unknown{
 				{Name: "driveway width", Note: "wide enough for a truck and a car to pass", Unit: "feet"},
 			},
-			dependsOn:    []string{"demo-barn-slab"},
+			dependsOn: []string{"demo-barn-slab"},
+			shots: []shot{
+				{"the run to the back, as it is now", false, 3},
+				{"access from the front apron", false, 4},
+				{"the number on the porch post", true, 1},
+			},
 			ceilingMinor: 700000,
 		},
 	}
@@ -128,6 +146,51 @@ func seedDemoProject(srv *exchange.Server) error {
 		if err := srv.Board.Post(l); err != nil {
 			return err
 		}
+		// The photographs a buyer would supply. Drawn rather than shipped as
+		// files, so the demonstration does not depend on assets being present
+		// — but they travel the same path a real one does: stored as a blob,
+		// attached to the listing, served from the public reference route.
+		for _, sh := range p.shots {
+			img := siteShot(sh.caption, sh.tone)
+			if err := srv.AddReference(l.Job, img, "image/jpeg",
+				sh.caption, sh.identifies); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+// shot is one seeded reference image.
+type shot struct {
+	caption    string
+	identifies bool
+	tone       int
+}
+
+// siteShot draws something recognisably different per reference, so the demo
+// board does not show the same grey rectangle five times.
+func siteShot(caption string, tone int) []byte {
+	grounds := [][3]uint8{
+		{104, 122, 96}, {150, 142, 128}, {96, 96, 102}, {118, 110, 92}, {88, 104, 116},
+	}
+	g := grounds[tone%len(grounds)]
+	img := image.NewRGBA(image.Rect(0, 0, 480, 360))
+	for y := 0; y < 360; y++ {
+		for x := 0; x < 480; x++ {
+			switch {
+			case y < 150:
+				img.Set(x, y, color.RGBA{R: 132, G: 162, B: 198, A: 255}) // sky
+			case y < 200:
+				img.Set(x, y, color.RGBA{R: g[0] / 2, G: g[1] / 2, B: g[2] / 2, A: 255})
+			default:
+				// A little banding so the ground is not flat.
+				d := uint8((y % 17) * 2)
+				img.Set(x, y, color.RGBA{R: g[0] + d, G: g[1] + d, B: g[2] + d, A: 255})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, img, &jpeg.Options{Quality: 82})
+	return buf.Bytes()
 }

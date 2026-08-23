@@ -50,6 +50,17 @@ type Offer struct {
 	// AutoAccepted says the exchange already claimed it on their behalf
 	// because they asked it to. When true the work is theirs as of this POST.
 	AutoAccepted bool `json:"auto_accepted"`
+	// WorkURL is where the job actually is, capability secret included in the
+	// fragment, exactly as the claim endpoint returns it to a person.
+	//
+	// Only set on an auto-accepted offer, and it is what makes auto-accept
+	// usable rather than merely true. Claiming mints the capability that
+	// authorises reading the brief and submitting evidence; this path was
+	// discarding it. The operator was told the work was theirs and handed a
+	// ClaimURL that would now conflict — a seat held, a job it could not open,
+	// and nothing in the payload admitting it. A fleet cannot ask a human what
+	// happened, so an offer it cannot act on is the same as no offer at all.
+	WorkURL string `json:"work_url,omitempty"`
 }
 
 // Dispatcher offers new work to operators who published an endpoint.
@@ -177,9 +188,13 @@ func (d *Dispatcher) deliver(ctx context.Context, worker string, cap Capacity, l
 	// finds it taken has been lied to.
 	var claimed bool
 	if cap.AutoAccept {
-		if _, _, err := d.Board.Claim(l.Job, worker); err == nil {
+		if secret, _, err := d.Board.Claim(l.Job, worker); err == nil {
 			claimed = true
 			off.AutoAccepted = true
+			// Same shape the claim endpoint hands a person: the secret rides
+			// in the fragment. One format for both, so a fleet and a phone
+			// consume the identical thing.
+			off.WorkURL = d.BaseURL + "/w/" + url.PathEscape(l.Job) + "#" + secret
 		} else {
 			// Nothing to auto-accept means nothing worth sending: they asked
 			// for work, not for a log of work they could not have.

@@ -38,8 +38,21 @@ main { padding: 1.1rem 1rem 3rem; }
 .drop .big { font-weight: 600; color: var(--ink); }
 .drop .sm { font-size: .8rem; color: var(--ink-3); }
 input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
-img#preview { width: 100%; border-radius: 3px; border: 1px solid var(--rule);
-  display: none; margin-bottom: .8rem; }
+/* The preview is bounded in both directions.
+   It had width:100% and no height rule at all, so a photograph straight off a
+   phone — 3024 x 4032, which is most of them — rendered about 45rem tall and
+   pushed the submit button and everything below it off the screen. The person
+   had done the work, taken the photo, and could no longer reach the button
+   that pays them.
+   object-fit keeps the aspect ratio inside the box, and max-width rather than
+   width stops a small image being blown up into a soft mess. */
+.shot { display: none; margin-bottom: .8rem; }
+.shot.on { display: block; }
+img#preview { display: block; max-width: 100%; max-height: 42vh; height: auto;
+  margin: 0 auto; border-radius: 3px; border: 1px solid var(--rule);
+  background: var(--bg); object-fit: contain; }
+.shot .cap { margin-top: .35rem; font: 500 .74rem/1.3 var(--mono); color: var(--ink-3);
+  text-align: center; }
 .done-card { padding: 1.6rem 1.2rem; text-align: center;
   border: 1px solid #1C4530; border-radius: 3px; background: linear-gradient(180deg,#0A1711,var(--bg)); }
 .next { color: var(--gold); font-weight: 600; }
@@ -242,7 +255,8 @@ function render() {
       '<p>Paper, a phone screen, anything. It proves the photo was taken now, for ' +
         'this job.</p>' +
     '</div>' +
-    '<img id="preview" alt="">' +
+    '<div class="shot" id="shot"><img id="preview" alt="The photograph you are about to send">' +
+      '<p class="cap" id="shotcap"></p></div>' +
     '<label class="drop" for="f">' +
       '<span class="big">Take a photo</span>' +
       '<span class="sm">Or choose one from your camera roll</span>' +
@@ -329,7 +343,15 @@ function render() {
     if (!chosen) { return; }
     var img = document.getElementById("preview");
     img.src = URL.createObjectURL(chosen);
-    img.style.display = "block";
+    document.getElementById("shot").classList.add("on");
+    // Say what is being sent. Somebody about to upload a 12MB photo over a
+    // phone signal at the side of a road is entitled to know that before it
+    // starts, not after it fails.
+    img.onload = function () {
+      var mb = (chosen.size / (1024 * 1024)).toFixed(1);
+      document.getElementById("shotcap").textContent =
+        img.naturalWidth + " x " + img.naturalHeight + " \u00b7 " + mb + " MB";
+    };
     send.disabled = false;
     document.querySelector("label.file").textContent = "Choose a different photo";
   });

@@ -256,6 +256,10 @@ type Listing struct {
 	// job was. Released to the claimant with Where, and to nobody else.
 	Access string `json:"access,omitempty"`
 
+	// References are what the buyer supplies so the work can be priced and the
+	// place found. See reference.go.
+	References []Reference `json:"references,omitempty"`
+
 	// SiteMark is what proves the photographs are of this property and not a
 	// similar one somewhere else. See sitemark.go. Inferred from the address
 	// when the buyer does not state one.
@@ -397,7 +401,10 @@ func (l *Listing) Public() *Listing {
 		// Instructions, Brief and Detail are filled in below, after screening.
 		Deliverable: l.Deliverable,
 		Unknowns:    l.Unknowns,
-		Currency:    l.Currency, Slots: l.Slots, Taken: l.Taken,
+		// Published deliberately. A bidder who cannot see the site is
+		// guessing, and an auction of guesses is worse than a fixed price.
+		References: l.References,
+		Currency:   l.Currency, Slots: l.Slots, Taken: l.Taken,
 		Tier: l.Tier, Expires: l.Expires, Posted: l.Posted,
 		Pricing: l.Pricing, BidsCloseAt: l.BidsCloseAt,
 		DistanceMiles: l.DistanceMiles, Skills: l.Skills,
@@ -613,6 +620,9 @@ func (b *Board) Post(l *Listing) (err error) {
 	}
 	// A job too big to settle on one photograph has to say how it settles.
 	if err := RequireStaging(l); err != nil {
+		return err
+	}
+	if err := l.ValidateReferences(); err != nil {
 		return err
 	}
 	switch l.Kind {
@@ -1250,6 +1260,23 @@ func (b *Board) Done(job, client string) {
 		b.claims[acct]--
 	}
 	b.completed[acct]++
+}
+
+// AttachReference adds a buyer's reference image to a listing.
+func (b *Board) AttachReference(job string, ref Reference) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l, ok := b.listings[job]
+	if !ok {
+		return ErrUnavailable
+	}
+	probe := *l
+	probe.References = append(append([]Reference(nil), l.References...), ref)
+	if err := probe.ValidateReferences(); err != nil {
+		return err
+	}
+	l.References = probe.References
+	return nil
 }
 
 // Accept records that a job's work passed verification, which is what
