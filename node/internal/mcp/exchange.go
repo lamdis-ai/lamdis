@@ -107,6 +107,13 @@ func RegisterExchange(s *sdk.Server, x *Exchange) {
 		Materials   bool   `json:"materials,omitempty" jsonschema:"true when this is reimbursement for supplies bought up front, paid against a receipt rather than against finished work"`
 	}
 
+	// unknownArg is something the buyer cannot pin down.
+	type unknownArg struct {
+		Name string `json:"name" jsonschema:"what is not known, e.g. driveway width"`
+		Note string `json:"note,omitempty" jsonschema:"whatever your human can say about it, in their words"`
+		Unit string `json:"unit,omitempty" jsonschema:"feet, square feet, hours"`
+	}
+
 	type doArgs struct {
 		Predicate             string     `json:"predicate" jsonschema:"what should be true once the job is done. Shown on the open board, so keep the exact address out of it"`
 		Instructions          string     `json:"instructions" jsonschema:"what the person should actually do"`
@@ -130,9 +137,12 @@ func RegisterExchange(s *sdk.Server, x *Exchange) {
 		// Multi-part work. A scope with a real order between its pieces was
 		// not expressible: an agent could post three jobs at one address and
 		// nothing recorded that they were one job, or which had to come first.
-		DependsOn []string `json:"depends_on,omitempty" jsonschema:"job ids in the same project that must be finished and accepted before this one may be started. Use this wherever the order is real — a slab cures before anything drives on it — because otherwise two crews book the same ground for the same morning"`
-		BidsAsOne bool     `json:"bids_as_one,omitempty" jsonschema:"accept a single offer covering every job in this project, priced per job and awarded together or not at all. Set this when the jobs share a site: arriving once is most of the cost of a small job, and a supplier who cannot bundle prices one mobilisation per job or loses"`
-		PlanBy    string   `json:"plan_by,omitempty" jsonschema:"who decides how this job breaks into stages: \"buyer\" (default, you supply stages) or \"supplier\" (the winning bidder proposes the breakdown and you accept it). Use supplier for trade work you do not know how to decompose — a homeowner does not know what a binder course is, and guessing produces a schedule the crew is then judged against"`
+		DependsOn []string     `json:"depends_on,omitempty" jsonschema:"job ids in the same project that must be finished and accepted before this one may be started. Use this wherever the order is real — a slab cures before anything drives on it — because otherwise two crews book the same ground for the same morning"`
+		BidsAsOne bool         `json:"bids_as_one,omitempty" jsonschema:"accept a single offer covering every job in this project, priced per job and awarded together or not at all. Set this when the jobs share a site: arriving once is most of the cost of a small job, and a supplier who cannot bundle prices one mobilisation per job or loses"`
+		Brief     string       `json:"brief,omitempty" jsonschema:"anything else about this job, in your own words, carried to whoever does it exactly as written and never interpreted. Put here whatever matters that no other field fits — the slope of the ground, when the owner is away, what the neighbour agreed. This is how you tell their agent what you know"`
+		Access    string       `json:"access,omitempty" jsonschema:"how to get in: gate code, where the key is, alarm sequence. Released only to whoever takes the job. Never put this in instructions or brief — those are published on the open board and a job containing entry details is refused"`
+		Unknowns  []unknownArg `json:"unknowns,omitempty" jsonschema:"what your human cannot specify — how wide they want the driveway, the footprint of the barn. Say so rather than guessing: a bid then has to state what it priced on and whether that price holds, and that assumption is what the finished work is judged against. Guessing instead produces a number that means nothing and an argument on site"`
+		PlanBy    string       `json:"plan_by,omitempty" jsonschema:"who decides how this job breaks into stages: \"buyer\" (default, you supply stages) or \"supplier\" (the winning bidder proposes the breakdown and you accept it). Use supplier for trade work you do not know how to decompose — a homeowner does not know what a binder course is, and guessing produces a schedule the crew is then judged against"`
 	}
 	sdk.AddTool(s, &sdk.Tool{Name: "do_in_world",
 		Description: "Have somebody go and do something physical — put up a sign, collect " +

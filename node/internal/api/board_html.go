@@ -266,6 +266,12 @@ function renderQueue() {
         '<div class="t"><span class="chip hot">' + kindLabel(w.kind) + '</span>' +
           esc(w.kind === "do" && w.instructions ? w.instructions : w.title) + '</div>' +
         '<div class="m">' + facts.join(" &middot; ") + '</div>' +
+        // What the work is and what would prove it. Both used to be withheld
+        // from the board, which meant nobody could price the job they were
+        // being asked to bid on.
+        (w.deliverable ? '<div class="dv">Proof: ' + esc(w.deliverable) + '</div>' : "") +
+        (w.brief ? '<div class="bf">' + esc(w.brief) + '</div>' : "") +
+        (w.withheld ? '<div class="wh">' + esc(w.withheld) + '</div>' : "") +
         '<div class="bid" id="bid-' + esc(w.job) + '" hidden>' +
           '<div class="bid-row">' +
             '<span class="cur">$</span>' +
@@ -273,6 +279,7 @@ function renderQueue() {
             '<button class="btn go sm" data-place="' + esc(w.job) + '">Place bid</button>' +
           '</div>' +
           '<input type="text" maxlength="140" placeholder="How you would do it (optional)" data-note="' + esc(w.job) + '">' +
+          askUnknowns(w) +
           '<p class="hint">You are naming your own price. Nobody has told you a budget, ' +
             'and other bids are not shown.</p>' +
         '</div>' +
@@ -342,13 +349,62 @@ function takeJob(button, job) {
   post(button, document.getElementById("e-" + job), "/v1/workers/claim/" + encodeURIComponent(job));
 }
 
+// askUnknowns renders a field per thing the buyer said they do not know.
+//
+// A price on a job whose dimensions nobody has established is a guess, and the
+// argument about it happens on site. Asking here costs one line each and makes
+// the offer mean something.
+function askUnknowns(w) {
+  var us = w.unknowns || [];
+  if (!us.length) { return ""; }
+  return '<div class="unk">' +
+    '<p class="unk-h">The buyer does not know these. Say what you priced on.</p>' +
+    us.map(function (u, i) {
+      return '<label class="unk-r">' +
+        '<span>' + esc(u.name) + (u.unit ? ' <i>(' + esc(u.unit) + ')</i>' : "") + '</span>' +
+        (u.note ? '<span class="unk-n">' + esc(u.note) + '</span>' : "") +
+        '<input type="text" maxlength="60" placeholder="what you assumed" ' +
+          'data-unk="' + esc(w.job) + '" data-unk-i="' + i + '" ' +
+          'data-unk-name="' + esc(u.name) + '">' +
+        '<label class="unk-f"><input type="checkbox" data-unkfirm="' + esc(w.job) +
+          '" data-unk-i="' + i + '" checked> price holds at this figure</label>' +
+      '</label>';
+    }).join("") +
+    '</div>';
+}
+
+function readAssumptions(job) {
+  var out = [];
+  document.querySelectorAll('[data-unk="' + job + '"]').forEach(function (el) {
+    var i = el.getAttribute("data-unk-i");
+    var firm = document.querySelector(
+      '[data-unkfirm="' + job + '"][data-unk-i="' + i + '"]');
+    out.push({
+      name: el.getAttribute("data-unk-name"),
+      value: el.value.trim(),
+      firm: !!(firm && firm.checked)
+    });
+  });
+  return out;
+}
+
 function placeBid(button, job) {
   var amount = toMinor(document.querySelector('[data-bid="' + job + '"]').value);
   var note = (document.querySelector('[data-note="' + job + '"]') || {}).value || "";
   var err = document.getElementById("e-" + job);
   if (amount <= 0) { err.textContent = "Enter what you would charge."; return; }
+  var assumptions = readAssumptions(job);
+  // Caught here as well as on the server, because being told what is missing
+  // while the form is still in front of you is the difference between a fix
+  // and a re-entry.
+  var blank = assumptions.filter(function (a) { return !a.value; });
+  if (blank.length) {
+    err.textContent = "Say what you priced on for: " +
+      blank.map(function (a) { return a.name; }).join(", ") + ".";
+    return;
+  }
   post(button, err, "/v1/workers/bid/" + encodeURIComponent(job),
-       {amount_minor: amount, note: note});
+       {amount_minor: amount, note: note, assumptions: assumptions});
 }
 
 function giveBack(button, job) {

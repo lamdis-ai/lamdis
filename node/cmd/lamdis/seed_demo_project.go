@@ -38,7 +38,8 @@ func seedDemoProject(srv *exchange.Server) error {
 	// is poured means tearing it up again.
 	pieces := []struct {
 		job, title, detail, deliverable string
-		instructions                    string
+		instructions, brief             string
+		unknowns                        []api.Unknown
 		dependsOn                       []string
 		ceilingMinor                    int64
 	}{
@@ -51,7 +52,16 @@ func seedDemoProject(srv *exchange.Server) error {
 			instructions: "Form, pour and finish the slab. Photograph each " +
 				"stage with the code in frame. This is a demonstration: read " +
 				"it, price it, do not drive anywhere.",
-			deliverable:  "Slab poured, floated and edged, with the code legible in shot.",
+			deliverable: "Slab poured, floated and edged, with the code legible in shot.",
+			brief: "Owner has never measured the barn. Ground slopes maybe a foot " +
+				"across the back. Tractor is a compact, not a full-size. Happy to " +
+				"take a recommendation on thickness.",
+			// The buyer genuinely does not know these, so they are stated
+			// rather than guessed. A bid has to answer them.
+			unknowns: []api.Unknown{
+				{Name: "slab footprint", Note: "roughly barn-sized; never measured", Unit: "feet"},
+				{Name: "slab thickness", Note: "whatever will take a compact tractor", Unit: "inches"},
+			},
 			ceilingMinor: 450000,
 		},
 		{
@@ -62,7 +72,9 @@ func seedDemoProject(srv *exchange.Server) error {
 			instructions: "Cut out failed sections, patch, and overlay. " +
 				"Photograph before and after with the code in frame. This is a " +
 				"demonstration: read it, price it, do not drive anywhere.",
-			deliverable:  "Driveway patched and overlaid, apron level, code legible in shot.",
+			deliverable: "Driveway patched and overlaid, apron level, code legible in shot.",
+			brief: "Cracking is worst in the ten feet nearest the road. Owner would " +
+				"rather patch than replace if it will hold five years.",
 			ceilingMinor: 550000,
 		},
 		{
@@ -74,7 +86,12 @@ func seedDemoProject(srv *exchange.Server) error {
 			instructions: "Excavate, base, binder and surface the new run. " +
 				"Photograph each stage with the code in frame. This is a " +
 				"demonstration: read it, price it, do not drive anywhere.",
-			deliverable:  "New drive surfaced and rolled, tying into the slab, code legible in shot.",
+			deliverable: "New drive surfaced and rolled, tying into the slab, code legible in shot.",
+			brief: "Needs to be wide enough for a truck and a car to pass. Drainage " +
+				"runs toward the road. Neighbour's fence is the boundary on the left.",
+			unknowns: []api.Unknown{
+				{Name: "driveway width", Note: "wide enough for a truck and a car to pass", Unit: "feet"},
+			},
 			dependsOn:    []string{"demo-barn-slab"},
 			ceilingMinor: 700000,
 		},
@@ -85,6 +102,10 @@ func seedDemoProject(srv *exchange.Server) error {
 			Job: p.job, Kind: api.KindDo,
 			Title: p.title, Detail: p.detail,
 			Instructions: p.instructions, Deliverable: p.deliverable,
+			// Open text, carried verbatim, and what the buyer cannot pin down.
+			Brief: p.brief, Unknowns: p.unknowns,
+			// Entry details live here and reach only whoever takes the job.
+			Access: "Demonstration only — there is no property and nothing to enter.",
 			// Practice throughout. A demonstration somebody can mistake for
 			// real work is worse than no demonstration: they travel, find
 			// nothing, and learn that the board is fake.

@@ -1242,6 +1242,11 @@ type CreateTaskRequest struct {
 	// Report asks for a structured answer instead of, or alongside, photographs.
 	Report []api.ReportField `json:"report,omitempty"`
 
+	// Open text and open questions. See internal/api/brief.go.
+	Brief    string        `json:"brief,omitempty"`
+	Access   string        `json:"access,omitempty"`
+	Unknowns []api.Unknown `json:"unknowns,omitempty"`
+
 	// Multi-part work. See internal/api/scope.go for why a scope's shape has
 	// to reach the supply side rather than living only in the agent's plan.
 	DependsOn []string `json:"depends_on,omitempty"`
@@ -1317,6 +1322,9 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request, princi
 		DependsOn: in.DependsOn,
 		BidsAsOne: in.BidsAsOne,
 		PlanBy:    in.PlanBy,
+		Brief:     in.Brief,
+		Access:    in.Access,
+		Unknowns:  in.Unknowns,
 		// Recorded from the credential that posted it, so the claim is the
 		// exchange's rather than the buyer's.
 		PostedByAgent: postedByAgent,

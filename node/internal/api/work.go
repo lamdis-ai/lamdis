@@ -219,11 +219,19 @@ type workBrief struct {
 	Detail string `json:"detail,omitempty"`
 	// Instructions and Deliverable are what the job actually asks for.
 	//
-	// They were on the public board and missing from this brief, so the one
-	// person entitled to read them — the claimant — was the only one who
-	// could not. They arrive here now, and only here.
+	// Also on the public board now, and they have to be: somebody asked to
+	// name a price cannot do it without them. What stays private is Access,
+	// below, which is the part that was really the reason to withhold these.
 	Instructions string `json:"instructions,omitempty"`
 	Deliverable  string `json:"deliverable,omitempty"`
+	// Access is how to get in. Released here and nowhere else, alongside Where.
+	Access string `json:"access,omitempty"`
+	// Brief is the buyer's agent's own text, carried through untouched.
+	Brief string `json:"brief,omitempty"`
+	// Agreed is what the winning bid said it priced on — the driveway width,
+	// the barn footprint. The work is judged against these, so the person
+	// doing it has to be able to read them.
+	Agreed []Assumption `json:"agreed,omitempty"`
 	// Window is when the buyer needs this done, in words. Empty if any time
 	// will do.
 	Window string `json:"window,omitempty"`
@@ -255,6 +263,7 @@ func (s *WorkServer) handleBrief(w http.ResponseWriter, r *http.Request, c *Capa
 	brief := workBrief{
 		Job: l.Job, Title: l.Title, Where: l.Where, Detail: l.Detail,
 		Instructions: l.Instructions, Deliverable: l.Deliverable,
+		Access: l.Access, Brief: l.Brief, Agreed: l.Agreed,
 		Window:   l.Window(),
 		PayMinor: l.PayMinor, BonusMinor: l.BonusMinor, Currency: l.Currency,
 		Tier:    l.Tier,

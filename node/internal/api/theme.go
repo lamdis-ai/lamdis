@@ -158,6 +158,24 @@ h1 { margin: 0 0 .3rem; font: 700 1.45rem/1.15 var(--sans); letter-spacing: -.03
             background: var(--panel); padding: .75rem .9rem; margin: 0 0 1.2rem;
             font-size: .84rem; color: var(--ink-2); border-radius: 0 3px 3px 0; }
 .note-box b { color: var(--ink); }
+/* What the job is, what proves it, and what the buyer could not pin down.
+   None of this used to reach the board, which is why bidding was guesswork. */
+.dv { font-size: .8rem; color: var(--ink-2); margin-top: .3rem; }
+.bf { font-size: .8rem; color: var(--ink-3); margin-top: .3rem; font-style: italic;
+      border-left: 2px solid var(--rule-2); padding-left: .55rem; }
+.wh { font-size: .78rem; color: var(--warn); margin-top: .3rem; }
+.unk { margin: .6rem 0 0; padding: .6rem .7rem; background: var(--bg);
+       border: 1px solid var(--rule); border-radius: 3px; }
+.unk-h { margin: 0 0 .5rem; font-size: .78rem; color: var(--gold); }
+.unk-r { display: block; margin-bottom: .6rem; font-size: .8rem; }
+.unk-r > span { display: block; color: var(--ink-2); }
+.unk-r i { color: var(--ink-3); font-style: normal; }
+.unk-n { color: var(--ink-3) !important; font-size: .75rem; margin-bottom: .25rem; }
+.unk-r input[type=text] { width: 100%; margin-top: .25rem; }
+.unk-f { display: flex; align-items: center; gap: .35rem; margin-top: .3rem;
+         font-size: .74rem; color: var(--ink-3); }
+.unk-f input { width: auto; margin: 0; }
+
 pre.api { background: var(--bg); border: 1px solid var(--rule); border-radius: 3px;
           padding: .8rem .9rem; overflow-x: auto; margin: 0 0 1.2rem;
           font: 500 .76rem/1.6 var(--mono); color: var(--ink-2); }

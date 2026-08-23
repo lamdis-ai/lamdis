@@ -38,6 +38,8 @@ type Bid struct {
 	// as much as on price, and hiding it would make every job an auction on
 	// cost alone.
 	Note string `json:"note,omitempty"`
+	// Assumptions answer whatever the job said it does not know. See brief.go.
+	Assumptions []Assumption `json:"assumptions,omitempty"`
 	// AvailableFrom is the earliest they could do it.
 	AvailableFrom time.Time `json:"available_from,omitempty"`
 	Placed        time.Time `json:"placed"`
@@ -49,7 +51,7 @@ type Bid struct {
 //
 // One bid per worker per job, replaced if they revise it: letting somebody
 // stack bids would let one worker crowd out every other offer a buyer sees.
-func (b *Board) PlaceBid(job, worker string, amountMinor int64, currency, note string, from time.Time) (*Bid, error) {
+func (b *Board) PlaceBid(job, worker string, amountMinor int64, currency, note string, from time.Time, assumptions ...Assumption) (*Bid, error) {
 	if amountMinor <= 0 {
 		return nil, fmt.Errorf("board: a bid must name an amount")
 	}
@@ -70,6 +72,12 @@ func (b *Board) PlaceBid(job, worker string, amountMinor int64, currency, note s
 	if l.Awarded != "" {
 		return nil, fmt.Errorf("board: this job has already been awarded")
 	}
+	// A number with nothing behind it is not an offer. A job that says it does
+	// not know its own dimensions has to be bid with a stated assumption, or
+	// both sides discover on site that they bought different things.
+	if err := l.CheckAssumptions(assumptions); err != nil {
+		return nil, err
+	}
 	// Nobody bids on a job they are meant to judge, or judges one they bid on.
 	if l.Parent != "" && b.worked[worker][l.Parent] {
 		return nil, fmt.Errorf("board: you worked on what this reviews")
@@ -81,6 +89,7 @@ func (b *Board) PlaceBid(job, worker string, amountMinor int64, currency, note s
 	bid := &Bid{
 		ID: fmt.Sprintf("%s:%s", job, worker), Job: job, Worker: worker,
 		AmountMinor: amountMinor, Currency: currency, Note: note,
+		Assumptions:   append([]Assumption(nil), assumptions...),
 		AvailableFrom: from, Placed: now,
 	}
 	if b.bids == nil {
@@ -151,6 +160,10 @@ func (b *Board) Award(job, bidID string, funded func(*Listing) error) (*Bid, err
 	}
 	l.PayMinor = won.AmountMinor
 	l.Awarded = won.Worker
+	// What was assumed becomes part of the job. Accepting a bid accepts the
+	// figures it was priced on, and the evidence is judged against those —
+	// not against the blank the buyer started with.
+	l.Agreed = append([]Assumption(nil), won.Assumptions...)
 	won.Won = true
 	return won, nil
 }

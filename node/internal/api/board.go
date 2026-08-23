@@ -236,6 +236,35 @@ type Listing struct {
 	// Project is the shape of that scope, filled in by the board on the way
 	// out. Never set by a caller.
 	Project *ProjectBrief `json:"project,omitempty"`
+	// Brief is open text from the buyer's agent, carried verbatim to whoever
+	// does the work and never interpreted by the exchange.
+	//
+	// An agent posting a job knows things about it that no schema here will
+	// ever have a field for. Rather than guess at those fields, carry the text.
+	// This is the difference between an execution layer and a project manager:
+	// the exchange proves what happened, and does not pretend to understand the
+	// trade.
+	Brief string `json:"brief,omitempty"`
+
+	// Access is how to get in: the gate code, which flowerpot the key is
+	// under, the alarm sequence.
+	//
+	// Split out of Instructions, which used to carry both this and the
+	// description of the work. One field holding a secret and a necessity
+	// means one of them is always handled wrong, and the one that lost was
+	// bidding: Instructions had to stay private, so nobody could read what the
+	// job was. Released to the claimant with Where, and to nobody else.
+	Access string `json:"access,omitempty"`
+
+	// Unknowns are what the buyer cannot specify. See brief.go.
+	Unknowns []Unknown `json:"unknowns,omitempty"`
+	// Agreed is what the winning bid said it priced on, carried onto the job
+	// so the work is judged against the figures both sides accepted.
+	Agreed []Assumption `json:"agreed,omitempty"`
+	// Withheld explains a redaction on the public board, so a job with no
+	// visible instructions does not read as an empty one.
+	Withheld string `json:"withheld,omitempty"`
+
 	// DependsOn names jobs that must be finished before this one may start.
 	//
 	// Physical work has an order that is real: a slab cures before anything
@@ -338,8 +367,8 @@ func (b *Board) All() []*Listing {
 func (l *Listing) Public() *Listing {
 	p := &Listing{
 		Job: l.Job, Parent: l.Parent, Kind: l.Kind,
-		Title: l.Title, Detail: l.Detail,
-		// Where and Instructions are deliberately absent.
+		Title: l.Title,
+		// Where and Access are deliberately absent.
 		//
 		// A buyer's agent writes what somebody needs to get in — a gate code,
 		// which flowerpot the key is under, an alarm sequence. Publishing that
@@ -347,9 +376,23 @@ func (l *Listing) Public() *Listing {
 		// it to anybody who curls the board. The sealed-bid design took great
 		// care to hide the price and was publishing the front door.
 		//
+		// That used to mean withholding Instructions, because entry details
+		// lived in them — which left a bidder unable to read the work they
+		// were pricing. Access is now its own field, so the secret can stay
+		// secret without the job being illegible.
+		//
 		// The claimant gets both, over the capability, once they hold the job.
-		Area:     l.Area,
-		Currency: l.Currency, Slots: l.Slots, Taken: l.Taken,
+		Area: l.Area,
+		// What the work is, and what would prove it. Both are published, and
+		// both have to be: an operator asked to name a price without them is
+		// guessing, and an auction of guesses is worse than a fixed price.
+		//
+		// Access is the part that stays private, and it is now its own field
+		// rather than a paragraph buried in these.
+		// Instructions, Brief and Detail are filled in below, after screening.
+		Deliverable: l.Deliverable,
+		Unknowns:    l.Unknowns,
+		Currency:    l.Currency, Slots: l.Slots, Taken: l.Taken,
 		Tier: l.Tier, Expires: l.Expires, Posted: l.Posted,
 		Pricing: l.Pricing, BidsCloseAt: l.BidsCloseAt,
 		DistanceMiles: l.DistanceMiles, Skills: l.Skills,
@@ -371,6 +414,32 @@ func (l *Listing) Public() *Listing {
 		// centimetre. Distance is computed server-side and returned as
 		// DistanceMiles; nothing a caller does needs the point itself.
 		ExpenseCapMinor: l.ExpenseCapMinor,
+	}
+	// Instructions and Brief are published so a job can be priced, but only
+	// after being checked. Post refuses entry details in them; this is the
+	// backstop on the path that actually reaches an anonymous caller.
+	var withheld bool
+	for _, f := range []struct {
+		src string
+		dst *string
+	}{
+		{l.Instructions, &p.Instructions},
+		{l.Brief, &p.Brief},
+		{l.Detail, &p.Detail},
+		{l.Title, &p.Title},
+	} {
+		txt, hid := publishable(f.src)
+		*f.dst = txt // empty when withheld, so a miss here cannot leak
+		if hid {
+			withheld = true
+		}
+	}
+	if withheld {
+		// Said out loud rather than silently truncated. An operator reading a
+		// job with nothing where the instructions should be needs to know it
+		// is a redaction and not an empty job.
+		p.Withheld = "Some of this job's description is held back until it is " +
+			"claimed, because it reads like entry details."
 	}
 	if l.Pricing == PriceBids {
 		// What the buyer would pay is exactly what must not be published.
@@ -528,6 +597,9 @@ func (b *Board) Post(l *Listing) (err error) {
 		return fmt.Errorf("board: a listing needs a job and a title")
 	}
 	if err := l.ValidateStages(); err != nil {
+		return err
+	}
+	if err := l.ValidateBrief(); err != nil {
 		return err
 	}
 	switch l.Kind {

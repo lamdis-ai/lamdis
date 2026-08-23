@@ -347,6 +347,8 @@ func (s *WorkerServer) handleBid(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		AmountMinor int64  `json:"amount_minor"`
 		Note        string `json:"note,omitempty"`
+		// Assumptions answer whatever the job said it does not know.
+		Assumptions []Assumption `json:"assumptions,omitempty"`
 		// AvailableFrom is when they could start, as a date.
 		AvailableFrom string `json:"available_from,omitempty"`
 	}
@@ -364,7 +366,7 @@ func (s *WorkerServer) handleBid(w http.ResponseWriter, r *http.Request) {
 		from, _ = time.Parse("2006-01-02", in.AvailableFrom)
 	}
 	bid, err := s.Board.PlaceBid(r.PathValue("job"), worker.ID,
-		in.AmountMinor, "", in.Note, from)
+		in.AmountMinor, "", in.Note, from, in.Assumptions...)
 	if err != nil {
 		writeWork(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return

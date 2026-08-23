@@ -55,8 +55,9 @@ func (s *WorkerServer) handleScopeBid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Lines []BidLine `json:"lines"`
-		Note  string    `json:"note,omitempty"`
+		Lines       []BidLine    `json:"lines"`
+		Note        string       `json:"note,omitempty"`
+		Assumptions []Assumption `json:"assumptions,omitempty"`
 		// AllOrNothing defaults true when omitted, which is why it is a
 		// pointer. A contractor who priced one mobilisation across three jobs
 		// and did not think about this field wants all three or none, and the
@@ -82,7 +83,7 @@ func (s *WorkerServer) handleScopeBid(w http.ResponseWriter, r *http.Request) {
 		from, _ = time.Parse("2006-01-02", in.AvailableFrom)
 	}
 	bid, err := s.Board.PlaceProjectBid(r.PathValue("project"), worker.ID,
-		in.Lines, "", in.Note, from, allOrNothing)
+		in.Lines, "", in.Note, from, allOrNothing, in.Assumptions...)
 	if err != nil {
 		writeWork(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return

@@ -275,6 +275,8 @@ type ProjectBid struct {
 	Currency   string `json:"currency"`
 	// Note is how they would run it — the sequence, the crew, the week.
 	Note string `json:"note,omitempty"`
+	// Assumptions answer whatever the pieces said they do not know.
+	Assumptions []Assumption `json:"assumptions,omitempty"`
 	// AllOrNothing means award every line or none.
 	//
 	// Defaults true, and that default is the point of the feature. A contractor
@@ -297,7 +299,7 @@ type BidLine struct {
 }
 
 // PlaceProjectBid records an offer across a whole project.
-func (b *Board) PlaceProjectBid(projectID, worker string, lines []BidLine, currency, note string, from time.Time, allOrNothing bool) (*ProjectBid, error) {
+func (b *Board) PlaceProjectBid(projectID, worker string, lines []BidLine, currency, note string, from time.Time, allOrNothing bool, assumptions ...Assumption) (*ProjectBid, error) {
 	if worker == "" {
 		return nil, fmt.Errorf("board: a bid needs a bidder")
 	}
@@ -345,6 +347,11 @@ func (b *Board) PlaceProjectBid(projectID, worker string, lines []BidLine, curre
 		if !l.BidsCloseAt.IsZero() && now.After(l.BidsCloseAt) {
 			return nil, fmt.Errorf("board: bidding has closed on %s", ln.Job)
 		}
+		// Every piece's open questions have to be answered, whichever piece
+		// they belong to. A bundle is one offer and carries one set.
+		if err := l.CheckAssumptions(assumptions); err != nil {
+			return nil, err
+		}
 		total += ln.AmountMinor
 	}
 	// An all-or-nothing bid that does not cover the scope is not all of
@@ -367,6 +374,7 @@ func (b *Board) PlaceProjectBid(projectID, worker string, lines []BidLine, curre
 		ID: projectID + ":" + worker, Project: projectID, Worker: worker,
 		Lines: append([]BidLine(nil), lines...), TotalMinor: total,
 		Currency: currency, Note: note, AllOrNothing: allOrNothing,
+		Assumptions:   append([]Assumption(nil), assumptions...),
 		AvailableFrom: from, Placed: now,
 	}
 	if b.projectBids == nil {
@@ -446,6 +454,7 @@ func (b *Board) AwardProject(projectID, bidID string, funded func(*Listing) erro
 	for _, p := range todo {
 		p.l.PayMinor = p.amount
 		p.l.Awarded = won.Worker
+		p.l.Agreed = append([]Assumption(nil), won.Assumptions...)
 	}
 	won.Won = true
 	return won, nil
