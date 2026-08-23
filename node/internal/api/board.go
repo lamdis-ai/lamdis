@@ -256,6 +256,11 @@ type Listing struct {
 	// job was. Released to the claimant with Where, and to nobody else.
 	Access string `json:"access,omitempty"`
 
+	// SiteMark is what proves the photographs are of this property and not a
+	// similar one somewhere else. See sitemark.go. Inferred from the address
+	// when the buyer does not state one.
+	SiteMark *SiteMark `json:"site_mark,omitempty"`
+
 	// Unknowns are what the buyer cannot specify. See brief.go.
 	Unknowns []Unknown `json:"unknowns,omitempty"`
 	// Agreed is what the winning bid said it priced on, carried onto the job

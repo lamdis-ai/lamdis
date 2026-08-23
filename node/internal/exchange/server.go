@@ -743,11 +743,7 @@ func (s *Server) handleJobReceipt(w http.ResponseWriter, r *http.Request, key *a
 		"job": job, "kind": l.Kind, "predicate": l.Title,
 		"issued_by": s.PID, "issued_at": s.now().Format(time.RFC3339),
 		"evidence": evidence, "accepted": settled,
-		"verification": map[string]any{
-			"challenge": "a code issued privately to the worker had to appear in the evidence",
-			"geofenced": l.RadiusM > 0,
-			"tier":      l.Tier,
-		},
+		"verification": verificationBlock(l, subs),
 	}
 	// The buyer's own identifiers, carried untouched and signed with the rest.
 	//
@@ -1244,6 +1240,7 @@ type CreateTaskRequest struct {
 
 	// Open text and open questions. See internal/api/brief.go.
 	Brief    string        `json:"brief,omitempty"`
+	SiteMark *api.SiteMark `json:"site_mark,omitempty"`
 	Access   string        `json:"access,omitempty"`
 	Unknowns []api.Unknown `json:"unknowns,omitempty"`
 
@@ -1323,6 +1320,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request, princi
 		BidsAsOne: in.BidsAsOne,
 		PlanBy:    in.PlanBy,
 		Brief:     in.Brief,
+		SiteMark:  in.SiteMark,
 		Access:    in.Access,
 		Unknowns:  in.Unknowns,
 		// Recorded from the credential that posted it, so the claim is the
@@ -1606,4 +1604,96 @@ func parseWhen(s string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// verificationBlock is what the receipt says about how sure anybody can be.
+//
+// The landing page said we "cap how sure any answer claims to be, and say so
+// on the receipt". Half of that was true. The cap is real and stricter than
+// the sentence implies — with capture unattested the whole tier ladder
+// collapses to 0.85, and to 0.72 without capture metadata, so nothing here can
+// claim more however good it looks. The receipt said none of it.
+//
+// What it did say was worse than nothing: a "tier" field carrying the tier the
+// buyer *asked for*. A receipt reading V2 when the achievable ceiling was 0.72
+// is not a cautious claim, it is a misleading one.
+//
+// So the receipt now states the ceiling, why it is that number, and — the part
+// that matters most — what was and was not established. A reader who wants to
+// know whether to believe it should not have to read our source.
+func verificationBlock(l *api.Listing, subs []api.Submission) map[string]any {
+	hasGeo, markSeen := false, false
+	var mark *api.SiteMark
+	for _, sub := range subs {
+		if sub.SiteMark != nil {
+			mark = sub.SiteMark
+		}
+		if sub.MarkSeen {
+			markSeen = true
+		}
+		for _, a := range sub.Artifacts {
+			if a.HasGeo {
+				hasGeo = true
+			}
+		}
+	}
+	ceiling := verify.Tier(strings.ToUpper(l.Tier)).Ceiling(hasGeo)
+
+	established := []string{
+		"the evidence carries a code issued privately for this job, so it was " +
+			"made after the job was taken and not before",
+		"the evidence has not been submitted here before",
+		"the evidence does not score as generated",
+	}
+	if l.RadiusM > 0 && hasGeo {
+		established = append(established,
+			"at least one file records a capture location inside the area the job named")
+	}
+	if mark != nil && markSeen {
+		established = append(established,
+			"something identifying this property was legible in the evidence: "+mark.Text)
+	}
+
+	// The limits, in the same detail as the assurances. A receipt that lists
+	// only what it proved is an advertisement.
+	limits := []string{
+		"no camera signed these images at capture, so nothing here rules out a " +
+			"sufficiently determined fabrication. That is why the ceiling is " +
+			"below 1 and does not move with the tier",
+		"verification answers whether something happened, not whether it was " +
+			"done well",
+	}
+	if l.RadiusM > 0 && hasGeo {
+		limits = append(limits,
+			"capture location comes from file metadata, which whoever produced "+
+				"the file chose what to write. It raises the cost of faking; it "+
+				"does not settle location")
+	}
+	if l.RadiusM > 0 && !hasGeo {
+		limits = append(limits, "no file recorded where it was taken")
+	}
+	if mark == nil && l.TiedToPlace() {
+		limits = append(limits,
+			"nothing identifies this property in the evidence, so it establishes "+
+				"that the work was done somewhere, not that it was done here")
+	}
+	if mark != nil && !markSeen {
+		limits = append(limits,
+			"the property mark ("+mark.Text+") was not legible, so the evidence "+
+				"is not tied to this address")
+	}
+
+	out := map[string]any{
+		"confidence_ceiling": ceiling,
+		"ceiling_because": "capture is not attested in hardware, so every tier " +
+			"collapses to the same ceiling. See limits",
+		"tier_requested": l.Tier,
+		"established":    established,
+		"limits":         limits,
+	}
+	if mark != nil {
+		out["site_mark"] = map[string]any{"text": mark.Text, "seen": markSeen,
+			"inferred": mark.Derived}
+	}
+	return out
 }

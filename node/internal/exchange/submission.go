@@ -129,6 +129,31 @@ func (sv *SubmissionVerifier) Verify(sub api.Submission, blob func(string) ([]by
 			sub.Challenge)
 		return sub, fmt.Errorf("%s", sub.Why)
 	}
+	// Whose lawn is it.
+	//
+	// Everything above establishes that a photograph was taken recently, by
+	// somebody holding a code, of something that matches the predicate. None
+	// of it establishes *where*. A cut lawn is a cut lawn; the geofence reads
+	// EXIF, which whoever made the file chose what to write.
+	//
+	// So a mark that belongs to the property has to be legible. The failure is
+	// soft on a derived mark and hard on one the buyer stated, because those
+	// are different claims: the buyer knows whether their number can be seen
+	// from the work, and the exchange inferring one from an address is
+	// guessing. Refusing honest work over our own guess would be the worse
+	// error, so a derived mark that is missing is recorded and capped rather
+	// than rejected.
+	if m := sub.SiteMark; m != nil {
+		sub.MarkSeen = api.MarkSeenIn(sv.allTranscribedText(), m.Text)
+		if !sub.MarkSeen && !m.Derived {
+			sub.Why = fmt.Sprintf(
+				"none of the photographs show %s, so there is nothing tying them "+
+					"to this property rather than a similar one. Include it in one "+
+					"shot — %s", m.Text, m.Note)
+			return sub, fmt.Errorf("%s", sub.Why)
+		}
+	}
+
 	// Fabricated imagery.
 	//
 	// The describer scores this on every image and, until it was measured,
@@ -572,6 +597,30 @@ func containsChallenge(obs *vision.Observation, challenge string) bool {
 		}
 	}
 	return false
+}
+
+// allTranscribedText is every string the describers read out of the evidence.
+//
+// Collected from the blind pass, which never knew what was being looked for.
+// That is the whole reason the comparison can be trusted: a submitter cannot
+// persuade a describer to report a house number it did not see, because the
+// describer was not told which number pays.
+func (sv *SubmissionVerifier) allTranscribedText() []string {
+	sv.mu.Lock()
+	defer sv.mu.Unlock()
+	var out []string
+	for _, obs := range sv.seen {
+		if obs == nil {
+			continue
+		}
+		for _, t := range obs.TextVisible {
+			out = append(out, t.Text)
+		}
+		for _, g := range obs.Signage {
+			out = append(out, g.Text)
+		}
+	}
+	return out
 }
 
 // normalizeCode folds the confusions an OCR pass makes on handwriting.

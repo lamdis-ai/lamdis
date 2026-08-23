@@ -161,6 +161,14 @@ type Submission struct {
 	// submission carries what it must reach.
 	Tier string `json:"tier,omitempty"`
 
+	// SiteMark is what had to be legible to show this is the right property.
+	// Copied from the listing so a submission carries the standard it was
+	// judged against, exactly as the geofence is.
+	SiteMark *SiteMark `json:"site_mark,omitempty"`
+	// MarkSeen records that it was found. False with a mark set means the
+	// photographs could be of anywhere.
+	MarkSeen bool `json:"mark_seen,omitempty"`
+
 	// Signals are what the describer thought of the imagery, recorded whether
 	// or not anything currently acts on them.
 	//
@@ -468,6 +476,9 @@ func (s *WorkServer) handleFinalize(w http.ResponseWriter, r *http.Request, c *C
 	}
 	if l != nil {
 		sub.Tier = l.Tier
+		if l.TiedToPlace() {
+			sub.SiteMark = l.MarkFor()
+		}
 		// The area the job named, so the evidence can be checked against it.
 		//
 		// These were declared on Submission and never populated, so
