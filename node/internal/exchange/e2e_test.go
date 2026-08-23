@@ -194,8 +194,8 @@ func TestEndToEndAJobIsPostedWorkedAndPaid(t *testing.T) {
 	}
 	// 500 base + 1800 bonus is only paid on a positive finding; a bare
 	// acceptance earns the base fee less the exchange's cut.
-	if pay != 500-12 {
-		t.Fatalf("worker credited %d, want %d", pay, 500-12)
+	if pay != net(500) {
+		t.Fatalf("worker credited %d, want %d", pay, net(500))
 	}
 	// The unearned part went back rather than sitting in escrow.
 	if held, _ := e.srv.Ledger.Held(ctx, "obs_1", "USD"); held != 0 {

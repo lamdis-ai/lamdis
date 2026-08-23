@@ -85,10 +85,20 @@ func RegisterExchange(s *sdk.Server, x *Exchange) {
 		Slots      int     `json:"slots,omitempty" jsonschema:"how many independent people should check (default 1)"`
 	}
 	sdk.AddTool(s, &sdk.Tool{Name: "observe_world",
-		Description: "Find out whether something is true in the physical world. " +
-			"Somebody goes and photographs it; the evidence is checked; you get an answer " +
-			"or your money back. Pays for honest evidence either way, so a 'no' is as " +
-			"reliable as a 'yes'."},
+		Description: "Find out whether something is actually true in the physical " +
+			"world, rather than what a website says about it. Somebody goes and " +
+			"photographs it, the evidence is checked, and you get an answer or " +
+			"your money back.\n\n" +
+			"Money leaves your person's balance when you post this. Call " +
+			"check_feasible first if you have not, and do not tell them the " +
+			"answer is coming until it has been taken.\n\n" +
+			"Whoever goes is paid for honest evidence whichever way it turns " +
+			"out, which is the reason a 'no' from here is worth as much as a " +
+			"'yes'. Treat both as real findings: if it comes back no, tell your " +
+			"person no. Reposting the same question hoping for a different answer " +
+			"spends their money to buy the answer you wanted.\n\n" +
+			"Write the predicate as something a stranger could photograph and " +
+			"settle without knowing anything else about the situation."},
 		func(ctx context.Context, req *sdk.CallToolRequest, a observeArgs) (*sdk.CallToolResult, any, error) {
 			out, err := x.call(ctx, "POST", "/v1/tasks", map[string]any{
 				"kind": "observe", "predicate": a.Predicate, "where": a.Where,
@@ -146,9 +156,23 @@ func RegisterExchange(s *sdk.Server, x *Exchange) {
 		PlanBy    string       `json:"plan_by,omitempty" jsonschema:"who decides how this job breaks into stages: \"buyer\" (default, you supply stages) or \"supplier\" (the winning bidder proposes the breakdown and you accept it). Use supplier for trade work you do not know how to decompose — a homeowner does not know what a binder course is, and guessing produces a schedule the crew is then judged against"`
 	}
 	sdk.AddTool(s, &sdk.Tool{Name: "do_in_world",
-		Description: "Have somebody go and do something physical — put up a sign, collect " +
-			"and deliver a parcel, check a meter — and bring back proof. Paid on completion. " +
-			"Set attempt_minor so somebody who travels to an impossible job is not left with nothing."},
+		Description: "Have something in the physical world made true — a sign hung, a " +
+			"parcel collected and delivered, a filter swapped, a slab poured — by " +
+			"whoever can do it: a person, a crew, a contractor, a drone, a " +
+			"machine. Comes back with proof it happened.\n\n" +
+			"Money leaves your person's balance when you post this. Do not post " +
+			"one without their agreement on the amount unless they have told you " +
+			"a ceiling and to get on with it.\n\n" +
+			"Call check_feasible first if you have not already. Do not describe " +
+			"this to your person as arranged until it has actually been taken.\n\n" +
+			"Write the deliverable as the thing you would need to see to believe " +
+			"it — that sentence is what the evidence is judged against, and a " +
+			"vague one means somebody argues about it later. Set attempt_minor so " +
+			"that whoever travels to an impossible job is not left with nothing; " +
+			"skip it and you teach the people here to take only the easy jobs. " +
+			"Put anything you know that no field covers into brief, and anything " +
+			"your person cannot specify into unknowns rather than guessing — a " +
+			"guessed dimension becomes a price nobody can hold to."},
 		func(ctx context.Context, req *sdk.CallToolRequest, a doArgs) (*sdk.CallToolResult, any, error) {
 			out, err := x.call(ctx, "POST", "/v1/tasks", map[string]any{
 				"kind": "do", "predicate": a.Predicate, "instructions": a.Instructions,
@@ -209,16 +233,25 @@ func RegisterExchange(s *sdk.Server, x *Exchange) {
 		Slots        int      `json:"slots,omitempty"`
 	}
 	sdk.AddTool(s, &sdk.Tool{Name: "check_feasible",
-		Description: "Ask whether anybody could do a job, before committing any " +
-			"money. Answers how much supply is reachable for that place and " +
-			"those qualifications, whether the job would be refused, and what " +
-			"work of this shape has actually been paid here if enough of it " +
-			"has. Holds nothing.\n\n" +
-			"It does not tell you what the work costs. This exchange has no idea " +
-			"— a driveway varies by yard, by region, by season and by what is " +
-			"under the old surface. Work the ceiling out yourself from what your " +
-			"person will pay, then post for bids: the people who do the work are " +
-			"the ones who know the price, which is what the bidding round is for."},
+		Description: "Call this BEFORE you tell your person that something can be " +
+			"done in the physical world. It costs nothing and holds nothing.\n\n" +
+			"If it comes back saying no supply is reachable, say so plainly and " +
+			"do not offer to arrange it. A promise that goes nowhere costs you " +
+			"your person's trust in everything else you tell them, and coverage " +
+			"here is thin and honest about it — this exchange is being built one " +
+			"place at a time and there are many addresses where nothing can be " +
+			"dispatched at all. Telling somebody their gutters will be cleared " +
+			"and then discovering nobody can do it is worse than telling them at " +
+			"the start that you cannot help with this one.\n\n" +
+			"It answers how much supply is reachable for that place and those " +
+			"qualifications, whether the job would be refused outright, and what " +
+			"work of this shape has actually been paid here once enough of it " +
+			"has.\n\n" +
+			"It does not tell you what the work costs, and you should not guess " +
+			"either. A driveway varies by yard, by region, by season and by what " +
+			"is under the old surface. Work out the most your person will pay, " +
+			"post for bids, and let the people who do the work name the price — " +
+			"that is what the bidding round is for."},
 		func(ctx context.Context, req *sdk.CallToolRequest, a quoteArgs) (*sdk.CallToolResult, any, error) {
 			out, err := x.call(ctx, "POST", "/v1/quote", map[string]any{
 				"kind": a.Kind, "predicate": a.Predicate,

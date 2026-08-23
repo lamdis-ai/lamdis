@@ -52,11 +52,15 @@ func TestAcceptedWorkCreditsTheWorker(t *testing.T) {
 	if err := s.settle(ctx, "obs_1", sub, "worker"); err != nil {
 		t.Fatalf("settling: %v", err)
 	}
-	// 2300 gross, 2.5% to the exchange.
+	// Derived from FeeBP rather than written out, so changing the fee is one
+	// edit in one place. Hard-coding 57 here meant the constant had a second,
+	// invisible copy that had to be found and updated by hand.
+	const gross = 2300
+	wantFee := int64(gross) - net(gross)
 	pay, _ := s.Ledger.Balance(ctx, ledger.PayableOf("worker"), "USD")
 	fee, _ := s.Ledger.Balance(ctx, ledger.AccountFees, "USD")
-	if pay != 2300-57 || fee != 57 {
-		t.Fatalf("worker %d, fee %d; want %d and 57", pay, fee, 2300-57)
+	if pay != net(gross) || fee != wantFee {
+		t.Fatalf("worker %d, fee %d; want %d and %d", pay, fee, net(gross), wantFee)
 	}
 	if err := s.Ledger.Audit(ctx); err != nil {
 		t.Fatal(err)
@@ -117,8 +121,8 @@ func TestDoJobPaysOnCompletionAndForAttempts(t *testing.T) {
 	if err := s.settle(ctx, "do_1", done, "finisher"); err != nil {
 		t.Fatal(err)
 	}
-	if pay, _ := s.Ledger.Balance(ctx, ledger.PayableOf("finisher"), "USD"); pay != 4000-100 {
-		t.Fatalf("completion paid %d", pay)
+	if pay, _ := s.Ledger.Balance(ctx, ledger.PayableOf("finisher"), "USD"); pay != net(4000) {
+		t.Fatalf("completion paid %d, want %d", pay, net(4000))
 	}
 
 	// Admissible evidence that does not show the job done is not a completion.
@@ -138,8 +142,8 @@ func TestDoJobPaysOnCompletionAndForAttempts(t *testing.T) {
 	if err := s.settle(ctx, "do_1", tried, "tryer"); err != nil {
 		t.Fatal(err)
 	}
-	if pay, _ := s.Ledger.Balance(ctx, ledger.PayableOf("tryer"), "USD"); pay != 800-20 {
-		t.Fatalf("a documented attempt paid %d, want %d", pay, 800-20)
+	if pay, _ := s.Ledger.Balance(ctx, ledger.PayableOf("tryer"), "USD"); pay != net(800) {
+		t.Fatalf("a documented attempt paid %d, want %d", pay, net(800))
 	}
 	if err := s.Ledger.Audit(ctx); err != nil {
 		t.Fatal(err)
@@ -184,8 +188,8 @@ func TestSettlementIsIdempotent(t *testing.T) {
 			t.Fatalf("attempt %d: %v", i, err)
 		}
 	}
-	if pay, _ := s.Ledger.Balance(ctx, ledger.PayableOf("worker"), "USD"); pay != 500-12 {
-		t.Fatalf("three settlements credited %d", pay)
+	if pay, _ := s.Ledger.Balance(ctx, ledger.PayableOf("worker"), "USD"); pay != net(500) {
+		t.Fatalf("three settlements credited %d, want %d", pay, net(500))
 	}
 	if err := s.Ledger.Audit(ctx); err != nil {
 		t.Fatal(err)
@@ -256,3 +260,11 @@ func TestSettlementCannotExceedEscrow(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// net is what a worker keeps of a gross amount, derived from the fee constant.
+//
+// Every one of these figures used to be written out — 2300-57, 4000-100,
+// 500-12 — which made the fee a constant with four undocumented copies. Change
+// it and the tests fail in four places with no clue that they are the same
+// fact. Derived once here instead.
+func net(gross int64) int64 { return gross - gross*FeeBP/10000 }

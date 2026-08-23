@@ -31,7 +31,19 @@ import (
 // "FeeBP" is a trap: quoting one while charging the other would understate or
 // overstate every payout. If they are ever meant to be the same figure, make
 // them the same constant.
-const FeeBP = 250
+// Zero, deliberately, and not forever.
+//
+// Two and a half percent of nothing is nothing. What the fee actually bought
+// was a reason for the first operators to look at this and decide it was not
+// worth the trouble — and the first operators are the entire product. There is
+// no supply to take a cut from until somebody has built it, and charging for
+// the privilege of building it is the wrong way round.
+//
+// It goes back up when there is enough work going through here that we have
+// earned it, and that is said out loud on the site rather than left as a
+// surprise. Whoever raises it should change this constant and that sentence in
+// the same commit.
+const FeeBP = 0
 
 // settle moves money for one accepted or rejected submission.
 //

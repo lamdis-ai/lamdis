@@ -316,6 +316,16 @@ function takeHome(minor) {
 function termsLine() {
   if (!TERMS) { return ""; }
   var pct = (TERMS.fee_bp / 100);
+  // Zero is worth saying properly, with the reason and the fact that it is
+  // temporary. "The exchange keeps 0%" reads like a rounding error.
+  if (!TERMS.fee_bp) {
+    return '<p class="terms"><b>You keep everything you earn.</b> ' +
+      'No fee while we are getting this off the ground &mdash; there is no ' +
+      'supply here to take a cut from until somebody builds it. Earnings are ' +
+      'paid out once they reach ' +
+      money(TERMS.payout_threshold_minor, "usd") + ', because a transfer costs ' +
+      'a flat fee either way.</p>';
+  }
   return '<p class="terms">The exchange keeps ' + pct + '% of what you earn. ' +
     'Earnings are paid out once they reach ' +
     money(TERMS.payout_threshold_minor, "usd") + ' \u2014 below that they stay ' +
