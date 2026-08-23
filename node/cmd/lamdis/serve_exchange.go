@@ -92,6 +92,12 @@ func cmdServeExchange(args []string) error {
 	fmt.Printf("  principal  %s\n", srv.PID)
 	fmt.Printf("  base url   %s\n", *baseURL)
 	fmt.Printf("  listening  %s\n", *addr)
+	if os.Getenv("LAMDIS_ACP_KEY") != "" && os.Getenv("LAMDIS_ACP_SECRET") != "" {
+		fmt.Printf("  checkout   agentic checkout is ON at %s/acp\n", *baseURL)
+	} else {
+		fmt.Printf("  checkout   agentic checkout is off " +
+			"(set LAMDIS_ACP_KEY and LAMDIS_ACP_SECRET)\n")
+	}
 	// State the shape of the deployment, because every one of these being
 	// absent is a silent failure that looks like a working service.
 	fmt.Printf("  storage    %s\n", orMemory(*data))

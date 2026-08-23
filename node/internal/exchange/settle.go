@@ -58,6 +58,12 @@ func (s *Server) settle(ctx context.Context, job string, sub api.Submission, wor
 	if !ok {
 		return fmt.Errorf("settle: no such job %s", job)
 	}
+	// A job bought through agentic checkout is paid from an authorisation on
+	// the buyer's card, not from a balance. Taking it here means the money
+	// moves at the same moment and on the same condition as every other
+	// settlement, rather than on a path of its own that could drift.
+	defer s.SettleACP(ctx, job, sub.Verified)
+
 	key := "settle:" + job + ":" + sub.Holder
 	// Already settled. The ledger would deduplicate the credit anyway, but the
 	// escrow check below would fail first and turn a harmless retry into an

@@ -48,6 +48,14 @@ type Server struct {
 	// configuration rather than something derived from the request.
 	BaseURL string
 
+	// Agentic checkout: selling outcomes inside somebody else's assistant.
+	// Absent keys switch it off entirely rather than leaving it open. See acp.go.
+	ACP *ACPSessions
+	// Charges authorises and captures cards for agentic checkout.
+	Charges   ChargeRail
+	ACPKey    string
+	ACPSecret string
+
 	Caps    *api.Capabilities
 	Workers *api.Workers
 	Reviews *api.ReviewStore
@@ -241,10 +249,16 @@ func Open(key ed25519.PrivateKey, baseURL string, opt Options) (*Server, error) 
 		srv.Mail = m
 	}
 	srv.Board.Suppliers = srv.Suppliers
+	// Agentic checkout. Both halves or neither: a key with no signing secret
+	// would mean accepting unsigned requests, which is worse than being off.
+	if k, sec := os.Getenv("LAMDIS_ACP_KEY"), os.Getenv("LAMDIS_ACP_SECRET"); k != "" && sec != "" {
+		srv.ACP, srv.ACPKey, srv.ACPSecret = NewACPSessions(), k, sec
+	}
 	srv.PayoutAccounts = NewPayoutAccounts(opt.DataDir)
 	srv.Holdbacks = NewHoldbacks(opt.DataDir)
 	if rail, err := payment.NewStripe(); err == nil {
 		srv.Rail = rail
+		srv.Charges = rail
 		srv.PayoutAccount = srv.payoutAccountFor
 		srv.Payout = func(ctx context.Context, person string, amountMinor int64, currency string) (string, error) {
 			return srv.payOut(ctx, person, amountMinor, currency)
@@ -433,6 +447,10 @@ func (s *Server) Handler() *http.ServeMux {
 		s.registerReferences(mux)
 		// The front door: MCP over HTTP, no binary to build.
 		s.registerMCP(mux)
+		// Agentic checkout, when it is configured.
+		if s.ACP != nil {
+			s.registerACP(mux)
+		}
 		s.registerBook(mux)
 		mux.HandleFunc("GET /v1/jobs/{job}/evidence", s.withAgent(s.handleJobEvidence))
 		mux.HandleFunc("GET /v1/jobs/{job}/evidence/{sha}", s.withAgent(s.handleEvidenceFile))
