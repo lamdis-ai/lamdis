@@ -51,11 +51,31 @@ func (s *Server) registerMCP(mux *http.ServeMux) {
 // Called per request by the SDK. It reads the key back out of the request
 // rather than closing over anything, which is what keeps one caller's tools
 // from ever holding another caller's balance.
+//
+// The credential also decides which half of the exchange you get. An agent key
+// belongs to somebody who pays for work, and gets the tools that send work out.
+// An operator's session token belongs to somebody who does the work, and gets
+// the tools that find it. One URL, because asking a person to know which of two
+// endpoints they are is a gate for no reason — and because plenty of people are
+// both.
 func (s *Server) mcpServerFor(r *http.Request) *sdk.Server {
 	srv := sdk.NewServer(&sdk.Implementation{
 		Name: "lamdis-exchange", Version: "1",
 	}, nil)
-	nodemcp.RegisterExchange(srv, nodemcp.NewExchange(s.BaseURL, agentKeyFrom(r)))
+	key := agentKeyFrom(r)
+
+	buyer := false
+	if s.agents != nil {
+		probe := r.Clone(r.Context())
+		probe.Header.Set("X-Lamdis-Key", key)
+		_, _, buyer = s.agents.AuthenticateAgent(probe)
+	}
+	if buyer {
+		nodemcp.RegisterExchange(srv, nodemcp.NewExchange(s.BaseURL, key))
+		return srv
+	}
+	// Otherwise it is an operator's own token, and they get the supply side.
+	nodemcp.RegisterOperator(srv, nodemcp.NewOperator(s.BaseURL, key))
 	return srv
 }
 
@@ -100,21 +120,41 @@ func (s *Server) requireAgentKey(next http.Handler) http.Handler {
 			})
 			return
 		}
-		// Checked here so a bad key fails once, plainly, rather than as an
-		// error inside every tool call the agent then tries.
-		if s.agents != nil {
-			probe := r.Clone(r.Context())
-			probe.Header.Set("X-Lamdis-Key", key)
-			if _, _, ok := s.agents.AuthenticateAgent(probe); !ok {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]any{
-					"error": "that agent key is not valid on this exchange",
-					"how":   "Issue a new one at " + s.BaseURL + "/console under Integration.",
-				})
-				return
-			}
+		// Checked here so a bad credential fails once, plainly, rather than as
+		// an error inside every tool call the agent then tries.
+		//
+		// Either credential is valid: an agent key for somebody buying work, an
+		// operator's own session token for somebody doing it.
+		if !s.knownCredential(r, key) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": "that key is not valid on this exchange",
+				"how": "To send work out, issue an agent key at " + s.BaseURL +
+					"/console under Integration. To find work, sign in at " +
+					s.BaseURL + "/signin and use the token from your console.",
+			})
+			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// knownCredential reports whether this is somebody we recognise, either side.
+func (s *Server) knownCredential(r *http.Request, key string) bool {
+	if s.agents != nil {
+		probe := r.Clone(r.Context())
+		probe.Header.Set("X-Lamdis-Key", key)
+		if _, _, ok := s.agents.AuthenticateAgent(probe); ok {
+			return true
+		}
+	}
+	if s.Workers != nil {
+		probe := r.Clone(r.Context())
+		probe.Header.Set("Authorization", "Bearer "+key)
+		if _, err := s.Workers.Authenticate(probe, nil, s.now()); err == nil {
+			return true
+		}
+	}
+	return false
 }
