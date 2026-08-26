@@ -106,8 +106,19 @@ func RegisterOperator(s *sdk.Server, o *Operator) {
 		})
 
 	type jobArg struct {
-		Job string `json:"job" jsonschema:"the job id from find_work"`
+		Job string `json:"job" jsonschema:"the job id, from find_work or from a pushed offer"`
 	}
+	sdk.AddTool(s, &sdk.Tool{Name: "read_job",
+		Description: "One job in full: what it asks for, what would count as proof, " +
+			"the photographs the buyer supplied, what they could not specify, and " +
+			"anything blocking it.\n\n" +
+			"Use this after an offer arrives on the webhook, which names a job id " +
+			"and little else. Read it before telling the operator about the work — " +
+			"a job with open questions cannot be bid without answering them, and " +
+			"the site photographs are what make a price mean anything."},
+		func(ctx context.Context, req *sdk.CallToolRequest, a jobArg) (*sdk.CallToolResult, any, error) {
+			return opResult(o.call(ctx, "GET", "/v1/board/"+a.Job, nil))
+		})
 	sdk.AddTool(s, &sdk.Tool{Name: "take_job",
 		Description: "Take a fixed-price job. It is theirs from this moment and the " +
 			"clock starts.\n\n" +
@@ -166,7 +177,9 @@ func RegisterOperator(s *sdk.Server, o *Operator) {
 	sdk.AddTool(s, &sdk.Tool{Name: "my_earnings",
 		Description: "What this operator is owed, what is clear to send, what a buyer " +
 			"has objected to, and how much more work they are allowed to hold.\n\n" +
-			"That last figure rises as they finish jobs. If they are near it, the " +
+			"Also lists the bids they have out that nobody has answered yet, so a " +
+			"bid does not disappear the moment it is placed.\n\n" +
+			"The room figure rises as they finish jobs. If they are near it, the " +
 			"answer to wanting bigger work is to finish what they have."},
 		func(ctx context.Context, req *sdk.CallToolRequest, _ none) (*sdk.CallToolResult, any, error) {
 			return opResult(o.call(ctx, "GET", "/v1/me", nil))
@@ -178,12 +191,16 @@ func RegisterOperator(s *sdk.Server, o *Operator) {
 		Accepting     *bool    `json:"accepting,omitempty" jsonschema:"false to finish what they hold and stop"`
 		Kinds         []string `json:"kinds,omitempty" jsonschema:"observe, do, or both"`
 		Skills        []string `json:"skills,omitempty" jsonschema:"what they are qualified for"`
+		Webhook       string   `json:"webhook,omitempty" jsonschema:"an https URL to push matching work to as it is posted. Set this if you can receive it — otherwise you are polling find_work and will miss things between checks. The response carries a signing secret; every offer is signed with it so you can tell ours from anyone else's"`
 	}
 	sdk.AddTool(s, &sdk.Tool{Name: "set_capacity",
 		Description: "Record what this operator will take, how much at once, and how " +
 			"far they will go. The exchange only ever offers them work inside these " +
 			"limits.\n\n" +
-			"Set it from what they told you in their own words — \"I'm in Detroit, " +
+			"If you can receive a webhook, set one. Work is pushed to it the " +
+			"moment it is posted, which is the difference between an agent that " +
+			"watches for them and one that checks now and then and misses things.\n\n" +
+			"Set the rest from what they told you in their own words — \"I'm in Detroit, " +
 			"I have a truck and a ladder, I'll go twenty miles\" is enough. Claiming " +
 			"a qualification they do not hold is not a preference, it is a lie that " +
 			"carries their name onto the job."},
@@ -203,6 +220,9 @@ func RegisterOperator(s *sdk.Server, o *Operator) {
 			}
 			if len(a.Skills) > 0 {
 				body["skills"] = a.Skills
+			}
+			if a.Webhook != "" {
+				body["webhook"] = a.Webhook
 			}
 			return opResult(o.call(ctx, "PUT", "/v1/capacity", body))
 		})

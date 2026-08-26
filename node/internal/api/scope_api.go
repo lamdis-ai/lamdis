@@ -21,6 +21,7 @@ func (s *WorkerServer) registerScope(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/scope/{project}", s.handleScope)
 	mux.HandleFunc("POST /v1/scope/{project}/bid", s.handleScopeBid)
 	mux.HandleFunc("POST /v1/workers/plan/{job}", s.handlePlan)
+	mux.HandleFunc("GET /v1/board/{job}", s.handleReadJob)
 }
 
 // handleScope returns a project as a supplier may see it.
@@ -125,4 +126,32 @@ func (s *WorkerServer) handlePlan(w http.ResponseWriter, r *http.Request) {
 		"proposed": true, "job": job, "stages": len(in.Stages),
 		"note": "the buyer sees your plan now; work can start once they accept it",
 	})
+}
+
+// handleReadJob returns one job as an operator may see it.
+//
+// The board lists what is open; this answers a question about one job in
+// particular, which is what somebody has after a dispatch offer arrives naming
+// a job id. Without it a pushed offer was a dead end: the agent knew the id and
+// had no way to look it up, so the only route to detail was scanning the whole
+// board and hoping it was still on it.
+func (s *WorkerServer) handleReadJob(w http.ResponseWriter, r *http.Request) {
+	body, _ := readBody(r)
+	if _, err := s.Workers.Authenticate(r, body, s.now()); err != nil {
+		refuse(w)
+		return
+	}
+	l, ok := s.Board.Get(r.PathValue("job"))
+	if !ok || l.Directed() {
+		// Directed work belongs to the vendor it was sent to and is not on the
+		// open board, so it is not something to look up either.
+		writeWork(w, http.StatusNotFound, map[string]string{"error": "no such job"})
+		return
+	}
+	pub := l.Public()
+	pub.BlockedBy = s.Board.Blocked(l.Job)
+	if l.ProjectID != "" {
+		pub.Project = s.Board.BriefFor(l.Job)
+	}
+	writeWork(w, http.StatusOK, pub)
 }

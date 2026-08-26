@@ -45,6 +45,7 @@ func TestOperatorToolSurface(t *testing.T) {
 		"my_work",
 		"place_bid",
 		"propose_stages",
+		"read_job",
 		"read_scope",
 		"set_capacity",
 		"take_job",
